@@ -22,7 +22,9 @@ namespace MainCore.Parsers
             return await locator.EvaluateAsync<bool>("node => node.classList.contains('active')");
         }
 
-        public record struct RawVillageDto(string? IdStr, string? Name, string? CoordinateX, string? CoordinateY, bool Active, bool UnderAttack);
+        public record struct RawVillageDto(string? IdStr, string? Name, string? CoordinateX, string? CoordinateY,
+            [property: System.Text.Json.Serialization.JsonPropertyName("IsActive")] bool Active,
+            [property: System.Text.Json.Serialization.JsonPropertyName("IsUnderAttack")] bool UnderAttack);
 
         public static async Task<List<VillageDto>> Get(IPage page)
         {

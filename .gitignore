@@ -382,3 +382,5 @@ Web/Shared/
 
 .understand-anything/intermediate/
 .understand-anything/diff-overlay.json
+twilio-alerts.local.json
+twilio-auth.local.dpapi

@@ -26,6 +26,12 @@
 
   <ItemGroup>
     <Content Include="favicon.ico" />
+    <Content Include="..\twilio-alerts.local.json" Condition="Exists('..\twilio-alerts.local.json')">
+      <Link>twilio-alerts.local.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="CP.Extensions.Hosting.ReactiveUI.Wpf" Version="5.0.0" />

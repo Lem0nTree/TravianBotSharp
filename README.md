@@ -24,6 +24,7 @@
 - Auto claim daily quest/ village quest
 - Auto NPC
 - Auto train troop
+- Twilio phone alerts for newly attacked villages, with persistent duplicate suppression ([setup](docs/twilio-attack-alerts.md))
 
 ## Tech specification
 

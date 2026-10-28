@@ -10,12 +10,13 @@ namespace MainCore.Commands.Update
         IDbContextFactory<AppDbContext> contextFactory,
         RxQueue rxQueue,
         TaskManager taskManager,
-        DefaultTemplatePathStore defaultTemplatePathStore)
+        DefaultTemplatePathStore defaultTemplatePathStore,
+        AttackAlertService attackAlerts)
     {
         public sealed record Command(AccountId AccountId) : IAccountCommand;
 
         private async ValueTask HandleAsync(
-            Command command)
+            Command command, CancellationToken cancellationToken)
         {
             await Task.CompletedTask;
             var accountId = command.AccountId;
@@ -24,6 +25,7 @@ namespace MainCore.Commands.Update
             if (dtos.Count == 0) return;
 
             UpdateToDatabase(accountId, dtos);
+            await attackAlerts.CheckAsync(accountId, dtos, cancellationToken);
             rxQueue.Enqueue(new VillagesModified(accountId));
             TriggerUpdateBuildingTask(accountId);
         }

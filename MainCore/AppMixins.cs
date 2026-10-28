@@ -52,6 +52,11 @@ namespace MainCore
             hostBuilder.ConfigureServices(services =>
             {
                 services.AddMainCore();
+                services.AddSingleton(_ => TwilioAttackAlertSettings.Load());
+                services.AddSingleton<IAttackAlertStateStore>(_ => new AttackAlertStateStore(
+                    Path.Combine(AppContext.BaseDirectory, "Data", "twilio-attack-state.json")));
+                services.AddSingleton<ITwilioCallClient>(sp => new TwilioCallClient(
+                    new HttpClient { Timeout = TimeSpan.FromSeconds(15) }, sp.GetRequiredService<TwilioAttackAlertSettings>()));
                 services.AddValidatorsFromAssembly(typeof(AppMixins).Assembly, ServiceLifetime.Singleton);
                 services.AddMainCoreHandlers();
 

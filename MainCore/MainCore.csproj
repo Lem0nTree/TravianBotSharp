@@ -55,6 +55,7 @@
     <PackageReference Include="Splat.Drawing" Version="21.0.0" />
     <PackageReference Include="Splat.Microsoft.Extensions.DependencyInjection" Version="21.0.0" />
     <PackageReference Include="StronglyTypedId" Version="1.0.0-beta06" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
   </ItemGroup>
   
   <ItemGroup>
