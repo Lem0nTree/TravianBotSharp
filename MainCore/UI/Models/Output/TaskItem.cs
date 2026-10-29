@@ -6,7 +6,7 @@ namespace MainCore.UI.Models.Output
     {
         public TaskItem(BaseTask task)
         {
-            Task = task.Description;
+            Task = string.IsNullOrEmpty(task.FailureStatus) ? task.Description : $"{task.Description} — {task.FailureStatus}";
             ExecuteAt = task.ExecuteAt;
             Stage = task.Stage;
         }

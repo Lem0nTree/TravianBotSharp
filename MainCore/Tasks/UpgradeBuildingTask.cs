@@ -14,7 +14,8 @@ namespace MainCore.Tasks
         HandleResourceCommand.Handler handleResourceCommand,
         HandleUpgradeCommand.Handler handleUpgradeCommand,
         UpdateBuildingCommand.Handler updateBuildingCommand,
-        TaskManager taskManager)
+        TaskManager taskManager,
+        IDbContextFactory<AppDbContext> contextFactory)
     {
         public sealed class Task(AccountId accountId, VillageId villageId) : VillageTask(accountId, villageId)
         {
@@ -74,13 +75,32 @@ namespace MainCore.Tasks
                 result = await handleUpgradeCommand.HandleAsync(new(task.VillageId, plan), cancellationToken);
                 if (result.IsFailed) return result;
 
-                logger.Information("Upgrade for {Type} at location {Location} completed successfully.", plan.Type, plan.Location);
-
-                result = await updateBuildingCommand.HandleAsync(new(task.VillageId), cancellationToken);
-                if (result.IsFailed) return result;
+                try
+                {
+                    result = await updateBuildingCommand.HandleAsync(new(task.VillageId), cancellationToken);
+                    if (result.IsFailed || !ConstructionObserved(task.VillageId, plan))
+                        return Result.Fail(new UncertainTaskOutcome("Construction was clicked, but the target building/queue change was not observed. Inspect the game before retrying."));
+                }
+                catch (Exception ex)
+                {
+                    logger.Warning("Construction stage=observation_uncertain village={VillageId} slot={Slot} errorType={ErrorType}", task.VillageId.Value, plan.Location, ex.GetType().Name);
+                    return Result.Fail(new UncertainTaskOutcome("Construction was clicked, but its result could not be read. Inspect the game before retrying."));
+                }
+                task.MadeProgress = true;
+                logger.Information("Construction observed for {Type} at location {Location} toward level {Level}.", plan.Type, plan.Location, plan.Level);
                 if (ShouldYield(task)) { task.ExecuteAt = DateTime.Now; return Result.Ok(); }
             }
         }
+
+        private bool ConstructionObserved(VillageId villageId, NormalBuildPlan plan)
+        {
+            using var db = contextFactory.CreateDbContext();
+            return HasConstructionEvidence(db, villageId, plan);
+        }
+
+        public static bool HasConstructionEvidence(AppDbContext db, VillageId villageId, NormalBuildPlan plan) =>
+            db.Buildings.Any(x => x.VillageId == villageId.Value && x.Location == plan.Location && x.Type == plan.Type && x.Level >= plan.Level)
+                || db.QueueBuildings.Any(x => x.VillageId == villageId.Value && x.Location == plan.Location && x.Type == plan.Type && x.Level >= plan.Level);
 
         private bool ShouldYield(Task task) => taskManager.GetTaskList(task.AccountId)
             .Any(x => x is IEvasionTask && x.ExecuteAt <= DateTime.Now.AddSeconds(25));

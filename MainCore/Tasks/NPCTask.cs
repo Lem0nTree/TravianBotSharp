@@ -45,6 +45,21 @@ namespace MainCore.Tasks
         private async ValueTask<Result> HandleAsync(Task task, CancellationToken cancellationToken)
         {
             Result result;
+            bool recovered;
+            try { result = await ExecuteCoreAsync(task, cancellationToken); }
+            finally
+            {
+                // Closing is read-only, even after settings changed or an exchange failed.
+                recovered = await TaskDialogRecovery.CloseNpcAsync(browser);
+            }
+            return recovered ? result : result.WithError(new BrowserRecoveryFailed("The NPC dialog could not be closed safely."));
+        }
+
+        private async ValueTask<Result> ExecuteCoreAsync(Task task, CancellationToken cancellationToken)
+        {
+            using (var db = contextFactory.CreateDbContext())
+                if (!task.CanStart(db)) return Skip.Error.WithError("NPC is disabled or no longer eligible.");
+            Result result;
             result = await toBuildingCommand.HandleAsync(new(task.VillageId, BuildingEnums.Marketplace), cancellationToken);
             if (result.IsFailed)
             {
@@ -76,8 +91,9 @@ namespace MainCore.Tasks
             logger.Information("Current resource:");
             await LogResource();
 
-            result = await npcCommand.HandleAsync(new(browser, values), cancellationToken);
+            result = await npcCommand.HandleAsync(new(browser, task.VillageId, values), cancellationToken);
             if (result.IsFailed) return result;
+            task.MadeProgress = true;
 
             logger.Information("After NPC:");
             await LogResource();
@@ -112,6 +128,7 @@ namespace MainCore.Tasks
             var granaryPercent = (int)(storage.Crop * 100f / storage.Granary);
 
             using var context = contextFactory.CreateDbContext();
+            if (!context.BooleanByName(villageId, VillageSettingEnums.AutoNPCEnable)) return false;
             var autoNPCGranaryPercent = context.ByName(villageId, VillageSettingEnums.AutoNPCGranaryPercent);
 
             if (granaryPercent < autoNPCGranaryPercent)

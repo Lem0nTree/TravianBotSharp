@@ -21,16 +21,18 @@ namespace MainCore.Services
         private readonly RxQueue _rxQueue;
         private readonly CustomServiceScopeFactory _serviceScopeFactory;
         private readonly IDbContextFactory<AppDbContext> _contextFactory;
+        private readonly TaskFailureController _taskFailures;
 
         private static readonly ResiliencePropertyKey<ContextData> contextDataKey = new(nameof(ContextData));
         private readonly ResiliencePipeline<Result> _pipeline;
 
-        public TimerManager(TaskManager taskManager, CustomServiceScopeFactory serviceScopeFactory, RxQueue rxQueue, IDbContextFactory<AppDbContext> contextFactory)
+        public TimerManager(TaskManager taskManager, CustomServiceScopeFactory serviceScopeFactory, RxQueue rxQueue, IDbContextFactory<AppDbContext> contextFactory, TaskFailureController taskFailures)
         {
             _taskManager = taskManager;
             _serviceScopeFactory = serviceScopeFactory;
             _rxQueue = rxQueue;
             _contextFactory = contextFactory;
+            _taskFailures = taskFailures;
 
             static async ValueTask OnRetry(OnRetryArguments<Result> args)
             {
@@ -75,11 +77,36 @@ namespace MainCore.Services
 
         public async Task Execute(AccountId accountId)
         {
+            try { await ExecuteCore(accountId); }
+            catch (Exception ex)
+            {
+                Serilog.Log.Warning("Account task execution stopped safely account={AccountId} errorType={ErrorType}; state may not have been saved. Inspect the game before restarting or resuming", accountId.Value, ex.GetType().Name);
+                _taskManager.SetStatus(accountId, StatusEnums.Paused);
+                if (_taskManager.GetTaskQueue(accountId).CancellationTokenSource?.IsCancellationRequested != true)
+                    NotifyAccountFailure(accountId, stateMayBeUnsaved: true);
+            }
+            finally
+            {
+                var queue = _taskManager.GetTaskQueue(accountId);
+                if (queue.IsExecuting)
+                {
+                    foreach (var running in queue.Tasks.Where(x => x.Stage == StageEnums.Executing)) running.Stage = StageEnums.Waiting;
+                    queue.IsExecuting = false;
+                    queue.CancellationTokenSource?.Dispose();
+                    queue.CancellationTokenSource = null;
+                    _rxQueue.Enqueue(new TasksModified(accountId));
+                }
+            }
+        }
+
+        private async Task ExecuteCore(AccountId accountId)
+        {
             var taskQueue = _taskManager.GetTaskQueue(accountId);
 
             var status = taskQueue.Status;
             if (status != StatusEnums.Online) return;
-            var task = EvasionScheduling.Select(taskQueue.Tasks, DateTime.Now, TimeSpan.FromSeconds(20));
+            _taskFailures.Apply(accountId, taskQueue.Tasks);
+            var task = EvasionScheduling.Select(taskQueue.Tasks.Where(x => !x.IsQuarantined), DateTime.Now, TimeSpan.FromSeconds(20));
             if (task is null) return;
             bool evasionEnabled;
             using (var settingsDb = _contextFactory.CreateDbContext())
@@ -102,6 +129,31 @@ namespace MainCore.Services
             var browser = scope.ServiceProvider.GetRequiredService<IChromeBrowser>();
             var logger = browser.Logger;
 
+            // Gate stale queued NPC work before any account/village behavior can navigate.
+            if (task is NpcTask.Task npc)
+            {
+                using var eligibility = _contextFactory.CreateDbContext();
+                if (!npc.CanStart(eligibility))
+                {
+                    var recovered = await TaskDialogRecovery.CloseNpcAsync(browser);
+                    _taskManager.Remove(accountId, task);
+                    task.Stage = StageEnums.Waiting;
+                    taskQueue.IsExecuting = false;
+                    var wasCancelled = cts.IsCancellationRequested;
+                    cts.Dispose();
+                    taskQueue.CancellationTokenSource = null;
+                    logger.Information("NPC stage=queued_task_skipped village={VillageId} reason=disabled-or-ineligible; paid exchange was not attempted", npc.VillageId.Value);
+                    if (!recovered)
+                    {
+                        _taskManager.SetStatus(accountId, StatusEnums.Paused);
+                        if (!wasCancelled) NotifyAccountFailure(accountId);
+                    }
+                    _rxQueue.Enqueue(new TasksModified(accountId));
+                    return;
+                }
+            }
+            task.MadeProgress = false;
+
             var contextData = new ContextData(task.Description, browser);
 
             ///===========================================================///
@@ -110,7 +162,7 @@ namespace MainCore.Services
             resilienceContext.Properties.Set(contextDataKey, contextData);
 
             Outcome<Result> poliResult;
-            if (task is IEvasionTask || evasionEnabled)
+            if (task is IEvasionTask || evasionEnabled || TaskFailureController.IsLocal(task))
             {
                 // A timed mutation can have an ambiguous outcome; never apply the
                 // generic retry pipeline to it.
@@ -133,8 +185,71 @@ namespace MainCore.Services
 
             taskQueue.IsExecuting = false;
 
+            var userCancelled = cts.IsCancellationRequested;
             cts.Dispose();
             taskQueue.CancellationTokenSource = null;
+
+            var local = TaskFailureController.IsLocal(task);
+            var uncertain = poliResult.Result?.HasError<UncertainTaskOutcome>() == true;
+            var fatal = poliResult.Exception?.GetType().Name == "TargetClosedException" || poliResult.Result?.HasError<BrowserRecoveryFailed>() == true
+                || !browser.IsInitialized || browser.CurrentPage.IsClosed;
+            var explicitCancel = userCancelled || poliResult.Result?.HasError<Cancel>() == true;
+            // Persist an uncertain action even if the user also paused or the browser closed.
+            if (local && uncertain)
+            {
+                _taskFailures.HoldUncertainInMemory(accountId, task);
+                ReportLocalFailure(uncertain: true);
+                if (!await TaskDialogRecovery.CloseLocalAsync(browser)) fatal = true;
+                if (explicitCancel || fatal) _taskManager.SetStatus(accountId, StatusEnums.Paused);
+                if (fatal && !explicitCancel) NotifyAccountFailure(accountId);
+                return;
+            }
+            if (explicitCancel || fatal)
+            {
+                logger.Warning("The account is pausing because the user cancelled or the shared browser could not be recovered.");
+                _taskManager.SetStatus(accountId, StatusEnums.Paused);
+                if (fatal && !explicitCancel) NotifyAccountFailure(accountId);
+                return;
+            }
+            var benignSkip = poliResult.Result is { IsFailed: true } skipped && skipped.HasError<Skip>() && !skipped.HasError<Retry>() && !skipped.HasError<Stop>();
+            var failed = poliResult.Exception is not null || poliResult.Result is { IsFailed: true } && !benignSkip;
+            if (local && failed && !explicitCancel && !fatal)
+            {
+                if (!await TaskDialogRecovery.CloseLocalAsync(browser))
+                {
+                    logger.Warning("Task recovery failed; the shared browser is unusable and the account is pausing.");
+                    _taskManager.SetStatus(accountId, StatusEnums.Paused);
+                    NotifyAccountFailure(accountId);
+                    return;
+                }
+                ReportLocalFailure(uncertain: false);
+                return;
+            }
+            if (local && task.MadeProgress && poliResult.Result is { } completed && (completed.IsSuccess || benignSkip))
+            {
+                _taskFailures.Succeeded(accountId, task);
+                _rxQueue.Enqueue(new TasksModified(accountId));
+            }
+
+            void ReportLocalFailure(bool uncertain)
+            {
+                var decision = _taskFailures.Fail(accountId, task, uncertain);
+                var detail = poliResult.Exception?.Message ?? string.Join("; ", poliResult.Result?.Errors.Select(x => x.Message) ?? []);
+                detail = System.Text.RegularExpressions.Regex.Replace(detail, @"https?://\S+|<[^>]+>", "<redacted>");
+                detail = string.Join(' ', detail.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+                if (detail.Length > 500) detail = detail[..500];
+                logger.Warning("Task failure detail task={TaskName} exceptionType={ErrorType} reason={Reason}", task.Description, poliResult.Exception?.GetType().Name ?? "result", detail);
+                logger.Warning("Task {TaskName} failure {Attempts}: {Summary} Other account tasks continue. Details remain in the task table and account log.", task.Description, decision.Attempts, decision.Summary);
+                if (decision.Notify)
+                {
+                    var village = task is MainCore.Tasks.Base.VillageTask v ? (VillageId?)v.VillageId : null;
+                    _rxQueue.Enqueue(new MainCore.Services.Telegram.TelegramAlert(accountId, village,
+                        MainCore.Services.Telegram.TelegramEvents.Errors,
+                        $"{task.Description}: {decision.Summary} Other tasks continue. Inspect the game and the task table. Pause the account and use Retry failed tasks after inspection.", $"task-failure-{decision.Episode}"));
+                    logger.Warning("Persistent task failure requires attention. A Telegram Errors alert is queued when that channel is configured; this local warning remains visible regardless of delivery.");
+                }
+                _rxQueue.Enqueue(new TasksModified(accountId));
+            }
 
             if (poliResult.Exception is not null)
             {
@@ -208,6 +323,12 @@ namespace MainCore.Services
             var delay = context.ByName(accountId, AccountSettingEnums.TaskDelayMin, AccountSettingEnums.TaskDelayMax);
             await Task.Delay(delay);
         }
+
+        private void NotifyAccountFailure(AccountId accountId, bool stateMayBeUnsaved = false) =>
+            _rxQueue.Enqueue(new MainCore.Services.Telegram.TelegramAlert(accountId, null,
+                MainCore.Services.Telegram.TelegramEvents.Errors,
+                "The account paused because browser or persistent task-state recovery failed. Inspect its task table and local log."
+                    + (stateMayBeUnsaved ? " Task state may not have been saved. Inspect the game before restarting or resuming." : ""), "account-recovery-fatal"));
 
         public void Shutdown()
         {

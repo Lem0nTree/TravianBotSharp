@@ -24,6 +24,7 @@ namespace MainCore.Infrasturecture.Persistence
         public DbSet<QueueBuilding> QueueBuildings { get; set; }
         public DbSet<Job> Jobs { get; set; }
         public DbSet<EvasionDispatch> EvasionDispatches { get; set; }
+        public DbSet<TaskFailureState> TaskFailureStates { get; set; }
         public DbSet<Storage> Storages { get; set; }
         public DbSet<VillageSetting> VillagesSetting { get; set; }
         public DbSet<Farm> FarmLists { get; set; }
@@ -34,6 +35,7 @@ namespace MainCore.Infrasturecture.Persistence
         {
             modelBuilder.Entity<EvasionDispatch>().HasKey(x => new { x.AccountId, x.VillageId, x.AttackId, x.Kind });
             modelBuilder.Entity<EvasionDispatch>().HasIndex(x => new { x.AccountId, x.VillageId, x.Kind, x.MovementId }).IsUnique();
+            modelBuilder.Entity<TaskFailureState>().HasKey(x => new { x.AccountId, x.VillageId, x.TaskType });
             base.OnModelCreating(modelBuilder);
         }
 

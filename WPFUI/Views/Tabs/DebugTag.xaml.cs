@@ -26,6 +26,7 @@ namespace WPFUI.Views.Tabs
                 this.BindCommand(ViewModel, vm => vm.LeftCommand, v => v.ReportButton).DisposeWith(d);
                 this.BindCommand(ViewModel, vm => vm.RightCommand, v => v.LogButton).DisposeWith(d);
                 this.BindCommand(ViewModel, vm => vm.BringToFrontCommand, v => v.BringToFrontButton).DisposeWith(d);
+                this.BindCommand(ViewModel, vm => vm.RetryFailedTasksCommand, v => v.RetryFailedTasksButton).DisposeWith(d);
             });
         }
     }

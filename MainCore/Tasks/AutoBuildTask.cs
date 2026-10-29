@@ -52,6 +52,7 @@ public sealed partial class AutoBuildTask(
         catch (InvalidOperationException ex) { logger.Warning("Auto build skipped: {Reason}", ex.Message); return Result.Ok(); }
         if (plan is null) return Result.Ok();
         tasks.AddOrUpdate(new UpgradeBuildingTask.Task(task.AccountId, task.VillageId));
+        task.MadeProgress = true;
         logger.Information("Auto build queued {Building} level {Level} at slot {Slot}", plan.Type, plan.Level, plan.Location);
         return Result.Ok();
     }

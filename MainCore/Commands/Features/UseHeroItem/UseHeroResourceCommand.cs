@@ -143,7 +143,7 @@ public sealed partial class UseHeroResourceCommand(IChromeBrowser browser, ILogg
         Result Uncertain()
         {
             logger.Warning("Hero resources stage=transfer_uncertain village={VillageId} slot={Slot}; inspect the game, transfer will not be retried automatically", villageId.Value, plan.Location);
-            return Stop.Error.WithError("Hero transfer outcome is uncertain. Inspect the game before resuming.");
+            return Result.Fail(new UncertainTaskOutcome("Hero transfer outcome is uncertain. Inspect the game before retrying this task."));
         }
     }
 

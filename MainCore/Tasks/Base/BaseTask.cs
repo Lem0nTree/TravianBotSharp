@@ -9,5 +9,8 @@
         protected virtual string TaskName { get; } = "";
 
         public virtual bool CanStart(AppDbContext context) => true;
+        public bool IsQuarantined { get; set; }
+        public string FailureStatus { get; set; } = "";
+        public bool MadeProgress { get; set; }
     }
 }

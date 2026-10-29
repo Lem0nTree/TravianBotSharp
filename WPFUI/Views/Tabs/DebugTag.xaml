@@ -83,10 +83,12 @@
                     IsReadOnly="True" />
             </Border>
         </Grid>
+        <UniformGrid Grid.Row="1" Columns="2">
         <Button
             x:Name="BringToFrontButton"
-            Grid.Row="1"
             Margin="10"
             Content="Bring browser to front" />
+        <Button x:Name="RetryFailedTasksButton" Margin="10" Content="Retry failed tasks" />
+        </UniformGrid>
     </Grid>
 </v:DebugTagBase>

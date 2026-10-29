@@ -10,7 +10,7 @@ namespace MainCore.Commands.Features.UpgradeBuilding
     {
         public sealed record Command(VillageId VillageId, NormalBuildPlan Plan) : IVillageCommand;
 
-        private async ValueTask<Result> HandleAsync(Command command)
+        private async ValueTask<Result> HandleAsync(Command command, CancellationToken token)
         {
             var (villageId, plan) = command;
 
@@ -19,12 +19,12 @@ namespace MainCore.Commands.Features.UpgradeBuilding
             Result result;
             if (CanUseSpecialUpgrade(villageId) && !UnskippableBuildings.Contains(plan.Type))
             {
-                result = await SpecialUpgrade(plan.Type);
+                result = await SpecialUpgrade(plan.Type, token);
                 if (result.IsFailed) return result;
             }
             else
             {
-                result = await Upgrade(plan.Type);
+                result = await Upgrade(plan.Type, token);
                 if (result.IsFailed) return result;
             }
 
@@ -70,15 +70,10 @@ namespace MainCore.Commands.Features.UpgradeBuilding
             return useSpecialUpgrade;
         }
 
-        private async Task<Result> SpecialUpgrade(BuildingEnums building)
+        private async Task<Result> SpecialUpgrade(BuildingEnums building, CancellationToken token)
         {
             var button = await UpgradeParser.GetSpecialButton(browser.CurrentPage, building);
-            var result = await browser.Click(button);
-            if (result.IsFailed) return result;
-
-            result = await HandleAds();
-            if (result.IsFailed) return result;
-            return Result.Ok();
+            return await CommitOnceAsync(button, HandleAds, token);
         }
 
         private async Task<Result> HandleAds()
@@ -106,16 +101,25 @@ namespace MainCore.Commands.Features.UpgradeBuilding
             return Result.Ok();
         }
 
-        private async Task<Result> Upgrade(BuildingEnums building)
+        private async Task<Result> Upgrade(BuildingEnums building, CancellationToken token)
         {
             var button = await UpgradeParser.GetNormalButton(browser.CurrentPage, building);
-            var result = await browser.Click(button);
-            if (result.IsFailed) return result;
+            return await CommitOnceAsync(button, () => browser.WaitPageChanged("dorf"), token);
+        }
 
-            result = await browser.WaitPageChanged("dorf");
-            if (result.IsFailed) return result;
-
-            return Result.Ok();
+        public async Task<Result> CommitOnceAsync(ILocator button, Func<Task<Result>> observeCompletion, CancellationToken token = default)
+        {
+            if (await button.CountAsync() != 1 || !await button.IsVisibleAsync() || !await button.IsEnabledAsync() || await button.EvaluateAsync<bool>("n => n.classList.contains('disabled')"))
+                return Retry.Error.WithError("The construction button is unavailable; no upgrade click was attempted.");
+            token.ThrowIfCancellationRequested();
+            try
+            {
+                var result = await browser.Click(button);
+                if (result.IsSuccess) result = await observeCompletion();
+                if (result.IsSuccess) return result;
+            }
+            catch (Exception ex) { logger.Warning("Construction stage=outcome_uncertain errorType={ErrorType}", ex.GetType().Name); }
+            return Result.Fail(new UncertainTaskOutcome("Construction may have started, but its outcome is uncertain. Inspect the game before retrying this village's build queue."));
         }
     }
 }

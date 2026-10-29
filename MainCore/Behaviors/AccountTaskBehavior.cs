@@ -54,6 +54,9 @@ namespace MainCore.Behaviors
             }
 
             var response = await Next(request, cancellationToken);
+            // Do not let unrelated post-task reads overwrite a local failure or an
+            // uncertain committing action. Its original outcome drives recovery.
+            if (response.IsFailed && TaskFailureController.IsLocal(request)) return response;
 
             isIngamePage = await LoginParser.IsIngamePage(browser.CurrentPage);
             if (isIngamePage)

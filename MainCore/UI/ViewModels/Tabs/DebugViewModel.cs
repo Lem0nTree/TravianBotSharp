@@ -20,6 +20,8 @@ namespace MainCore.UI.ViewModels.Tabs
         private readonly TaskManager _taskManager;
         private readonly ChromeManager _chromeManager;
         private readonly DialogService _dialogService;
+        private readonly TaskFailureController _taskFailures;
+        private readonly RxQueue _rxQueue;
         private static readonly ExpressionTemplate _template = new("{@t:HH:mm:ss} [{@l:u3}] {@m}\n{@x}");
 
         public ObservableCollection<TaskItem> Tasks { get; } = [];
@@ -31,12 +33,14 @@ namespace MainCore.UI.ViewModels.Tabs
         [Reactive]
         private string _endpointAddress = "";
 
-        public DebugViewModel(LogSink logSink, TaskManager taskManager, RxQueue rxQueue, ChromeManager chromeManager, DialogService dialogService)
+        public DebugViewModel(LogSink logSink, TaskManager taskManager, RxQueue rxQueue, ChromeManager chromeManager, DialogService dialogService, TaskFailureController taskFailures)
         {
             _logSink = logSink;
             _taskManager = taskManager;
             _chromeManager = chromeManager;
             _dialogService = dialogService;
+            _taskFailures = taskFailures;
+            _rxQueue = rxQueue;
 
             LoadTaskCommand.ObserveOn(RxSchedulers.MainThreadScheduler).Subscribe(items =>
             {
@@ -73,6 +77,24 @@ namespace MainCore.UI.ViewModels.Tabs
         }
 
         [ReactiveCommand(RunInBackground = true)]
+        private async Task RetryFailedTasks()
+        {
+            var accountId = AccountId;
+            if (_taskManager.GetStatus(accountId) is not (StatusEnums.Paused or StatusEnums.Offline) || _taskManager.IsExecuting(accountId))
+            {
+                await _dialogService.SendMessage("Pause first", "Pause the account and inspect any uncertain actions in the game before retrying failed tasks.");
+                return;
+            }
+            var count = _taskFailures.Count(accountId);
+            if (count == 0) { await _dialogService.SendMessage("Failed tasks", "There are no held tasks for this account."); return; }
+            if (!await _dialogService.SendConfirm("Retry failed tasks", $"Retry {count} held task(s)? Inspect the game for any uncertain hero transfers, construction or NPC exchanges first. Retry only after checking what already happened.")) return;
+            if (AccountId != accountId || _taskManager.GetStatus(accountId) is not (StatusEnums.Paused or StatusEnums.Offline) || _taskManager.IsExecuting(accountId))
+            { await _dialogService.SendMessage("Retry cancelled", "The selected account or its state changed. Pause it and inspect the game before retrying."); return; }
+            _taskFailures.ResetAfterInspection(accountId, _taskManager.GetTaskList(accountId));
+            _rxQueue.Enqueue(new TasksModified(accountId));
+        }
+
+        [ReactiveCommand(RunInBackground = true)]
         private bool LogEmitted(LogEmitted notification)
         {
             if (!IsActive) return false;
@@ -102,6 +124,7 @@ namespace MainCore.UI.ViewModels.Tabs
         [ReactiveCommand(RunInBackground = true)]
         private List<TaskItem> LoadTask(AccountId accountId)
         {
+            _taskFailures.Apply(accountId, _taskManager.GetTaskList(accountId));
             var tasks = _taskManager
                .GetTaskList(accountId)
                .OrderBy(x => x.ExecuteAt)
