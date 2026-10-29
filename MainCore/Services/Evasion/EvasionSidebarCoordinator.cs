@@ -7,6 +7,7 @@ public enum SidebarRefreshStatus { Refreshed, Reused, Failed, WaitingAfterFailur
 [RegisterSingleton<EvasionSidebarCoordinator>]
 public sealed class EvasionSidebarCoordinator(Func<DateTimeOffset>? clock = null)
 {
+    public static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(120);
     private sealed class State { public DateTimeOffset LastAttempt; public bool Fresh; public bool HasAttempt; }
     private readonly object _gate = new();
     private readonly Dictionary<int, State> _accounts = [];
@@ -22,7 +23,7 @@ public sealed class EvasionSidebarCoordinator(Func<DateTimeOffset>? clock = null
             else state = existing;
             var now = Now;
             if (state.HasAttempt && now < state.LastAttempt) state.LastAttempt = now;
-            if (state.HasAttempt && now - state.LastAttempt < TimeSpan.FromSeconds(10))
+            if (state.HasAttempt && now - state.LastAttempt < PollInterval)
                 return state.Fresh ? SidebarRefreshStatus.Reused : SidebarRefreshStatus.WaitingAfterFailure;
             state.HasAttempt = true;
             state.LastAttempt = now;

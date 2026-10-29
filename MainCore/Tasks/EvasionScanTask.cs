@@ -30,7 +30,7 @@ public sealed partial class EvasionScanTask(IChromeBrowser browser, SwitchVillag
         var originalTime = task.ExecuteAt;
         try { return await HandleCoreAsync(task, token, trace); }
         catch (Exception ex) { trace.Failure(ex); throw; }
-        finally { if (task.ExecuteAt != originalTime) task.ExecuteAt = DateTime.Now.AddSeconds(10); }
+        finally { if (task.ExecuteAt != originalTime) task.ExecuteAt = DateTime.Now.Add(EvasionSidebarCoordinator.PollInterval); }
     }
 
     private async ValueTask<Result> HandleCoreAsync(Task task, CancellationToken token, EvasionTrace trace)
@@ -38,7 +38,7 @@ public sealed partial class EvasionScanTask(IChromeBrowser browser, SwitchVillag
         trace.Retry("scan", "scan-started");
         using var db = factory.CreateDbContext();
         if (!task.CanStart(db)) { trace.Event("scan", "disabled-or-recovery-complete"); return Result.Ok(); }
-        task.ExecuteAt = DateTime.Now.AddSeconds(10);
+        task.ExecuteAt = DateTime.Now.Add(EvasionSidebarCoordinator.PollInterval);
         var destination = db.ByName(task.VillageId, VillageSettingEnums.EvasionDestinationId);
         trace.SetDetails(destination, null, null);
         var owned = db.Villages.Where(x => x.AccountId == task.AccountId.Value).Select(x => x.Id).ToArray();

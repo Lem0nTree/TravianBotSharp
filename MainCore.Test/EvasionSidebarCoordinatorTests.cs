@@ -32,7 +32,10 @@ public class EvasionSidebarCoordinatorTests
         switches.ShouldBe(1); rallies.ShouldBe(1); refreshes.ShouldBe(1);
         await Scan(false, true); // A pending recovery also needs its rally point.
         switches.ShouldBe(2); rallies.ShouldBe(2); refreshes.ShouldBe(1);
-        clock = clock.AddSeconds(10);
+        clock = clock.AddSeconds(119);
+        await Scan(false, false);
+        refreshes.ShouldBe(1);
+        clock = clock.AddSeconds(1);
         await Scan(false, false);
         refreshes.ShouldBe(2);
     }
@@ -47,7 +50,10 @@ public class EvasionSidebarCoordinatorTests
         (await coordinator.EnsureFreshAsync(new(1), Fail)).ShouldBe(SidebarRefreshStatus.Failed);
         (await coordinator.EnsureFreshAsync(new(1), Fail)).ShouldBe(SidebarRefreshStatus.WaitingAfterFailure);
         attempts.ShouldBe(1);
-        clock = clock.AddSeconds(10);
+        clock = clock.AddSeconds(119);
+        (await coordinator.EnsureFreshAsync(new(1), Fail)).ShouldBe(SidebarRefreshStatus.WaitingAfterFailure);
+        attempts.ShouldBe(1);
+        clock = clock.AddSeconds(1);
         (await coordinator.EnsureFreshAsync(new(1), () => { attempts++; return Task.FromResult(true); })).ShouldBe(SidebarRefreshStatus.Refreshed);
         (await coordinator.EnsureFreshAsync(new(1), Fail)).ShouldBe(SidebarRefreshStatus.Reused);
         attempts.ShouldBe(2);
