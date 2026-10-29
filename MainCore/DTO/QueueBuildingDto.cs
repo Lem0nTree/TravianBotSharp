@@ -1,4 +1,4 @@
-﻿#nullable disable
+#nullable disable
 
 using Riok.Mapperly.Abstractions;
 
@@ -33,6 +33,6 @@ namespace MainCore.DTO
         [MapperIgnoreTarget(nameof(QueueBuilding.VillageId))]
         private static partial QueueBuilding ToEntity(this QueueBuildingDto dto);
 
-        private static BuildingEnums ToBuildingEnums(string str) => Enum.Parse<BuildingEnums>(str);
+        private static BuildingEnums ToBuildingEnums(string str) => BuildingNameParser.Parse(str);
     }
 }

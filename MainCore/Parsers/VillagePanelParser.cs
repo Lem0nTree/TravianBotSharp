@@ -22,9 +22,7 @@ namespace MainCore.Parsers
             return await locator.EvaluateAsync<bool>("node => node.classList.contains('active')");
         }
 
-        public record struct RawVillageDto(string? IdStr, string? Name, string? CoordinateX, string? CoordinateY,
-            [property: System.Text.Json.Serialization.JsonPropertyName("IsActive")] bool Active,
-            [property: System.Text.Json.Serialization.JsonPropertyName("IsUnderAttack")] bool UnderAttack);
+        public record struct RawVillageDto(string? IdStr, string? Name, string? CoordinateX, string? CoordinateY, bool Active, bool UnderAttack);
 
         public static async Task<List<VillageDto>> Get(IPage page)
         {
@@ -42,8 +40,8 @@ namespace MainCore.Parsers
                         Name: nameEl ? (nameEl.innerText || nameEl.textContent).trim() : '',
                         CoordinateX: xEl ? (xEl.innerText || xEl.textContent).trim() : '0',
                         CoordinateY: yEl ? (yEl.innerText || yEl.textContent).trim() : '0',
-                        IsActive: node.classList.contains('active'),
-                        IsUnderAttack: node.classList.contains('attack')
+                        Active: node.classList.contains('active'),
+                        UnderAttack: node.classList.contains('attack')
                     });
                 });
                 return result;

@@ -24,9 +24,58 @@
 - Auto claim daily quest/ village quest
 - Auto NPC
 - Auto train troop
-- Twilio phone alerts for newly attacked villages, with persistent duplicate suppression ([setup](docs/twilio-attack-alerts.md))
 
-## Tech specification
+## Telegram notifications
+
+Open **Account settings → Configure Telegram notifications**. Settings are separate for each account and local database location.
+
+1. Create a Telegram bot with [@BotFather](https://t.me/BotFather), open your bot, and send `/start`. For a group, add the bot and send it a command there.
+2. Paste the bot token. Use **Find chats**, explicitly select your destination, or enter its numeric chat ID. Discovery reads recent updates without acknowledging them; if the bot already uses a webhook or another updates consumer, enter the ID manually or use a dedicated bot.
+3. Click **Send test** to send one message to that destination. Select **Enable Telegram notifications**, check the event types you want, and **Save**. Saving these settings is separate from the account settings Save button.
+
+Available checkboxes:
+
+| Notification | Trigger |
+| --- | --- |
+| Incoming attack | First observed attack flag; resets once a refresh sees no attack. It does not identify individual waves while the flag remains active. |
+| Completed upgrades | An observed building level increases after an initial baseline; initial village loading sends no completion history. |
+| Pending build queue dispatched or satisfied | The builder removes the last completed/already-started job. Active in-game construction can still be running. Manual queue deletion does not trigger this alert. |
+| Storage nearly full | Any resource reaches 90% capacity; re-arms when all resources fall to 80% or less. |
+| Low crop stocks | Crop falls to 10% of granary capacity or less; re-arms at 20%. This measures stocks, not starvation risk. |
+| Account status | Account becomes online, paused, or offline; intermediate transitions and repeated states are suppressed. |
+| Task failures and errors | A task stops after failure, or an Error/Fatal log is emitted. Only a summary is sent; repeated error summaries are limited to one per account per ten minutes. |
+
+Notifications follow normal game-page refreshes while the bot is running; this feature does not add independent game polling and cannot monitor while the app is closed. Attack and resource alerts may fire on the first refresh after enabling or restarting. Paused accounts receive only events that are still observed or generated locally.
+
+Tokens are stored in **Windows Credential Manager**, not account exports or JSON. Non-secret preferences are in `%LOCALAPPDATA%\TravianBotSharp\Telegram`. Messages include account name, server, relevant village and observation time. **Send silently** disables Telegram notification sound. **Disable / forget token** stops future queued alerts and removes the saved token; an already-sending message cannot be recalled.
+
+Delivery uses a bounded in-memory queue, plain text, no paid broadcasts, and pacing of at least 3.1 seconds between attempts. Telegram rate-limit responses may be retried once using `retry_after` (up to five minutes), with settings checked again first. Authentication and ambiguous network failures are not retried automatically. Alerts older than ten minutes, over capacity, or from changed settings are skipped. Pending alerts do not survive app shutdown. Use **Delivery status** to see the latest delivery result; the **Send test** button verifies real delivery with your own token.
+
+Protocol reference: [Telegram Bot API](https://core.telegram.org/bots/api#sendmessage), [Telegram message limits](https://core.telegram.org/bots/faq#my-bot-is-hitting-limits-how-do-i-avoid-this).
+
+## Auto Build (experimental)
+
+In a village's settings, enable **Automatically upgrade the lowest eligible building** and save. The bot refreshes fields and the village center approximately once per minute while the account is online. It selects one supported, existing building or resource field with the lowest level, breaking ties by slot, and places one upgrade in the regular build queue only when the observed construction queue and pending bot queue are empty. Normal upgrade settings still apply. The account must remain online; the timing is not guaranteed.
+
+Set the three-state **Capital status** separately for each village: checked means capital, unchecked means non-capital, and the dash means unknown. Unknown status prevents capital-only upgrades and limits resource fields to level 10. This setting is not imported from another village's settings file. Incorrect capital status can make the choice invalid. Turn off Auto Build and save to stop adding new jobs; an already queued or started upgrade remains in place.
+
+The current construction parser reads `.buildingList li`; two successive upgrades have been observed there, but master-builder pending orders and alternate game layouts have not been verified. Check those displays before enabling Auto Build.
+
+## Evasion (experimental)
+
+In each village's settings choose another owned village, set capital status, enable the desired evasion controls and save. Resource evasion attempts to send at 30 seconds before impact, using available merchant capacity in wood, clay, iron, crop order. Troop evasion is available only for a village explicitly marked non-capital; it attempts a reinforcement at 20 seconds before impact and cancels the uniquely identified movement after the relevant attack waves. The bot must be running and the account online. It checks for attacks independently of Auto Refresh, but browser or network delays, a late observation, multiple simultaneous actions, sleep, or downtime can cause a missed deadline.
+
+The first send click is allowed within one second after its target; a recognized confirmation click is allowed up to three seconds after the target and never at or after impact. Actual click drift is logged. Troop matching requires a verified source map tile from the home-troops table or an existing outgoing movement and uses coordinates to calculate the destination's map tile; without that evidence troop evasion skips.
+
+The observed English marketplace and rally forms inform the parsers, but the final confirmation and outgoing reinforcement layouts have only synthetic tests; no live send or cancellation has been tested. Unrecognized pages, destinations, capacities, times, or movement identities cause a skip. A submission whose outcome is uncertain is not retried blindly. It is recorded locally; inspect the in-game marketplace/rally point and the bot log for uncertain sends or cancellations. A troop send can require manual recovery if its exact movement cannot be identified, the cancellation window closes, or a previously unknown wave makes a safe return impossible. Resource deliveries are not automatically returned.
+
+The scheduler reserves the browser near known deadlines and resumes saved, identified troop cancellations after a restart where time remains. It cannot interrupt every ordinary task or detect attacks while the application is offline. Do not rely on it as the sole defense for a time-critical attack. Existing in-game capital evasion is separate; the bot does not dispatch troops from villages marked capital or unknown.
+
+## Twilio attack calls
+
+Optional Twilio calls are disabled until configured. See [Twilio attack-call setup](docs/twilio-attack-alerts.md) for the included configuration helper, costs, and delivery limitations. Alert processing runs separately from the browser scheduler and does not place calls at startup.
+
+## Platform
 
 Currently, TBS only runs on Windows.
 

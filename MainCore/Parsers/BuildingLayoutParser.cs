@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace MainCore.Parsers
@@ -141,7 +141,9 @@ namespace MainCore.Parsers
 
             foreach (var raw in rawQueueData)
             {
-                string cleanedType = (raw.TypeName ?? "").Replace(" ", "");
+                string cleanedType = BuildingNameParser.TryParse(raw.TypeName, out var type)
+                    ? type.ToString()
+                    : raw.TypeName ?? "";
 
                 var levelMatch = LevelExtractor().Match(raw.LevelText ?? "");
                 int level = levelMatch.Success && int.TryParse(levelMatch.Value, out var l) ? l : 0;

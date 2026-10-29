@@ -1,5 +1,6 @@
 using MainCore.Commands.Update;
 using MainCore.Tasks.Base;
+using MainCore.Services.Evasion;
 
 namespace MainCore.Behaviors
 {
@@ -17,6 +18,11 @@ namespace MainCore.Behaviors
     {
         public override async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken cancellationToken)
         {
+            if (request is IEvasionTask) return await Next(request, cancellationToken);
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return (TResponse)Cancel.Error;
+            }
             var accountId = request.AccountId;
             var cacheExecuteAt = request.ExecuteAt;
             var isIngamePage = await LoginParser.IsIngamePage(browser.CurrentPage);

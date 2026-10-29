@@ -24,6 +24,13 @@ namespace MainCore.Commands.Update
 
             UpdateToDatabase(villageId, dtoBuilding, dtoQueueBuilding, tribe);
             Trigger(villageId);
+            using (var context = contextFactory.CreateDbContext())
+            {
+                var account = context.Villages.Where(x => x.Id == villageId.Value).Select(x => (int?)x.AccountId).FirstOrDefault();
+                if (account is int id)
+                    rxQueue.Enqueue(new MainCore.Services.Telegram.TelegramVillageScan(new(id), villageId,
+                        Buildings: dtoBuilding.Select(x => new MainCore.Services.Telegram.ObservedBuilding(x.Location, x.Type, Math.Max(0, x.Level))).ToArray()));
+            }
             return Result.Ok();
         }
 
@@ -54,10 +61,12 @@ namespace MainCore.Commands.Update
 
         private static Result IsValidQueueBuilding(List<QueueBuildingDto> dtos)
         {
-            foreach (var strType in dtos.Select(x => x.Type))
+            foreach (var dto in dtos)
             {
-                var resultParse = Enum.TryParse(strType, false, out BuildingEnums _);
-                if (!resultParse) return Stop.Error.WithError($"Cannot parse {strType}. Is language English ?");
+                if (!BuildingNameParser.TryParse(dto.Type, out var type))
+                    return Stop.Error.WithError($"Cannot parse {dto.Type}. Is language English ?");
+
+                dto.Type = type.ToString();
             }
             return Result.Ok();
         }
@@ -113,7 +122,7 @@ namespace MainCore.Commands.Update
             var sets = new HashSet<string>();
             foreach (var dto in queueBuildingDtos)
             {
-                var buildingType = Enum.Parse<BuildingEnums>(dto.Type);
+                var buildingType = BuildingNameParser.Parse(dto.Type);
 
                 // same level same type but different location, bot need a way to check that
                 if (sets.Add($"{dto.Level}-{dto.Type}"))
@@ -186,7 +195,7 @@ namespace MainCore.Commands.Update
                 for (var i = 0; i < dbQueueBuildings.Count; i++)
                 {
                     var queueBuilding = dbQueueBuildings[i];
-                    if (queueBuildingDtos.All(x => x.Level != queueBuilding.Level || Enum.Parse<BuildingEnums>(x.Type) != queueBuilding.Type))
+                    if (queueBuildingDtos.All(x => x.Level != queueBuilding.Level || BuildingNameParser.Parse(x.Type) != queueBuilding.Type))
                     {
                         context.Remove(queueBuilding);
                         var building = dbBuildings.Find(x => x.Location == queueBuilding.Location);

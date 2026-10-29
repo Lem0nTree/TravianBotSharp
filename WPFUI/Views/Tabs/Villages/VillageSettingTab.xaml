@@ -35,6 +35,8 @@
                 <Border Style="{DynamicResource Box}">
                     <StackPanel>
                         <TextBlock HorizontalAlignment="Left" TextWrapping="Wrap" Text="Upgrade settings" VerticalAlignment="Center" FontWeight="Bold" />
+                        <CheckBox x:Name="AutoBuildEnable" Content="Automatically upgrade the lowest eligible building when both queues are empty" />
+                        <CheckBox x:Name="ConfirmedCapital" IsThreeState="True" Content="Capital status: checked = capital, unchecked = non-capital, dash = unknown" />
                         <CheckBox x:Name="UseHeroResForBuilding" Content="Use hero resources when lack of resources" />
                         <CheckBox x:Name="UseRomanQueueLogic" Content="Use Roman queue logic" />
                         <StackPanel Orientation="Horizontal">
@@ -51,6 +53,16 @@
                         <TextBlock HorizontalAlignment="Left" TextWrapping="Wrap" Text="Auto refresh" VerticalAlignment="Center" FontWeight="Bold" />
                         <CheckBox x:Name="AutoRefreshEnable" Content="Enable auto refresh" />
                         <uc:RangeInputUc x:Name="AutoRefreshTime" Text="Refresh every" Unit="minutes" />
+                    </StackPanel>
+                </Border>
+                <Border Style="{DynamicResource Box}">
+                    <StackPanel>
+                        <TextBlock Text="Evasion (experimental)" FontWeight="Bold" />
+                        <TextBlock Text="Unrecognized pages and uncertain actions require checking the bot log." TextWrapping="Wrap" />
+                        <CheckBox x:Name="ResourceEvasionEnable" Content="Move resources before an incoming attack" />
+                        <CheckBox x:Name="TroopEvasionEnable" Content="Move and return troops before an incoming attack" />
+                        <TextBlock Text="Owned destination village" />
+                        <ComboBox x:Name="EvasionDestination" DisplayMemberPath="Name" SelectedValuePath="Id" />
                     </StackPanel>
                 </Border>
                 <Border Style="{DynamicResource Box}">

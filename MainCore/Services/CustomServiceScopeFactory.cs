@@ -58,12 +58,12 @@ namespace MainCore.Services
         {
             switch (task)
             {
-                case ClaimQuestTask.Task claimQuestTask:
-                    var claimQuestTaskHandler = scope.GetHandler<ClaimQuestTask.Task>();
+                case ClaimVillageQuestTask.Task claimQuestTask:
+                    var claimQuestTaskHandler = scope.GetHandler<ClaimVillageQuestTask.Task>();
                     return await claimQuestTaskHandler.HandleAsync(claimQuestTask, cancellationToken);
 
-                case CompleteImmediatelyTask.Task completeImmediatelyTask:
-                    var completeImmediatelyTaskHandler = scope.GetHandler<CompleteImmediatelyTask.Task>();
+                case InstantUpgradeTask.Task completeImmediatelyTask:
+                    var completeImmediatelyTaskHandler = scope.GetHandler<InstantUpgradeTask.Task>();
                     return await completeImmediatelyTaskHandler.HandleAsync(completeImmediatelyTask, cancellationToken);
 
                 case LoginTask.Task loginTask:
@@ -101,6 +101,21 @@ namespace MainCore.Services
                 case UpdateVillageTask.Task updateVillageTask:
                     var updateVillageTaskHandler = scope.GetHandler<UpdateVillageTask.Task>();
                     return await updateVillageTaskHandler.HandleAsync(updateVillageTask, cancellationToken);
+
+                case EvasionScanTask.Task evasionScanTask:
+                    return await scope.GetHandler<EvasionScanTask.Task>().HandleAsync(evasionScanTask, cancellationToken);
+
+                case EvasionMerchantTask.Task evasionMerchantTask:
+                    return await scope.GetHandler<EvasionMerchantTask.Task>().HandleAsync(evasionMerchantTask, cancellationToken);
+
+                case EvasionTroopTask.Task evasionTroopTask:
+                    return await scope.GetHandler<EvasionTroopTask.Task>().HandleAsync(evasionTroopTask, cancellationToken);
+
+                case EvasionCancelTask.Task evasionCancelTask:
+                    return await scope.GetHandler<EvasionCancelTask.Task>().HandleAsync(evasionCancelTask, cancellationToken);
+
+                case AutoBuildTask.Task autoBuildTask:
+                    return await scope.GetHandler<AutoBuildTask.Task>().HandleAsync(autoBuildTask, cancellationToken);
 
                 case UpgradeBuildingTask.Task upgradeBuildingTask:
                     var upgradeBuildingTaskHandler = scope.GetHandler<UpgradeBuildingTask.Task>();

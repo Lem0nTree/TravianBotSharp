@@ -61,5 +61,10 @@
         AutoClaimQuestEnable,
 
         CompleteImmediatelyTime,
+        AutoBuildEnable,
+        ConfirmedCapitalStatus,
+        ResourceEvasionEnable,
+        TroopEvasionEnable,
+        EvasionDestinationId,
     }
 }

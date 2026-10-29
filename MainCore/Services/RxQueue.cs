@@ -1,5 +1,8 @@
 namespace MainCore.Services
 {
+    using MainCore.Infrasturecture.Extensions;
+    using MainCore.Services.Evasion;
+
     using ReactiveUI.Primitives;
     using ReactiveUI.Primitives.Signals;
 
@@ -58,6 +61,12 @@ namespace MainCore.Services
                 .ToList();
             foreach (var village in villages)
             {
+                var evasionScanTask = new EvasionScanTask.Task(accountId, village);
+                if (evasionScanTask.CanStart(context) && !taskManager.IsExist<EvasionScanTask.Task>(accountId, village))
+                    taskManager.Add(evasionScanTask);
+                var autoBuildTask = new AutoBuildTask.Task(accountId, village);
+                if (autoBuildTask.CanStart(context) && !taskManager.IsExist<AutoBuildTask.Task>(accountId, village))
+                    taskManager.Add(autoBuildTask);
                 var updateVillageTask = new UpdateVillageTask.Task(accountId, village);
                 if (updateVillageTask.CanStart(context) && !taskManager.IsExist<UpdateVillageTask.Task>(accountId, village))
                 {
@@ -82,6 +91,16 @@ namespace MainCore.Services
                 {
                     taskManager.Add(upgradeBuildingTask);
                 }
+            }
+            EvasionStore.EnsureSchema(context);
+            var recover = context.EvasionDispatches.AsNoTracking().Where(x => x.AccountId == accountId.Value && x.Kind == "troop" && x.State == "Sent" && x.MovementId != null).ToArray();
+            foreach (var item in recover)
+            {
+                if (!DateTimeOffset.TryParse(item.ImpactUtc, out var impact)) continue;
+                var cancel = new EvasionCancelTask.Task(accountId, new(item.VillageId), item.AttackId, item.MovementId!)
+                { ExecuteAt = impact.AddSeconds(1).LocalDateTime };
+                if (!taskManager.GetTaskList(accountId).Any(x => x is EvasionCancelTask.Task && x.Key == cancel.Key))
+                    taskManager.Add(cancel);
             }
         }
 

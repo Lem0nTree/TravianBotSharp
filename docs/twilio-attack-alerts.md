@@ -32,16 +32,16 @@ To disable:
 
 The per-account state is stored in `Data/twilio-attack-state.json`, with a cross-process lock and atomic replacement. Preserve it during upgrades. Each attempt is durably recorded **before** requesting a call. Failures, ambiguous timeouts, busy responses and unanswered calls are not automatically redialed for the same episode. A crash after saving an attempt but before sending it can therefore mean no call for that episode. Invalid or unwritable state prevents calls and is logged instead of resetting deduplication.
 
-The bot must be running, logged in and refreshing village data. It does not monitor attacks while closed, sleeping or paused. Twilio accepting a request does not establish that the user answered; check Voice logs for delivery.
+The bot must be running, logged in and refreshing village data. It does not monitor attacks while closed, sleeping or paused. The evasion scanner also supplies sidebar observations. Observations enter a bounded in-memory queue; processing and the Twilio request do not block the browser. A queued clear suppresses an older queued attack for the same village, while a later attack can start a new episode. Observations older than two minutes update deduplication state without placing a call. If the queue is full or the app shuts down before an observation is processed, it can be skipped; a later refresh can observe an ongoing attack. Twilio accepting a request does not establish that the user answered; check Voice logs for delivery.
 
 ## Build and verification
 
-This integration is based on TBS 2.13.0 source commit `cca31dbcf37f3b6cc8bffb609a98630775780c2a` and requires .NET 10. It corrects the parser's `IsActive`/`IsUnderAttack` JSON mapping without changing the main SQLite schema. Startup uses the executable directory so other launchers do not accidentally select a different database.
+This integration is ported from commit `7265c1cb27e4deb2299157eb626ffbbfb3f3bd95` into the combined bot and requires .NET 10. It preserves the combined village parser's `Active` and `UnderAttack` fields. Settings, attack state and the bot database resolve relative to the executable directory.
 
 ```powershell
 dotnet restore --locked-mode
-dotnet test --project MainCore.Test/MainCore.Test.csproj --no-restore
+dotnet run --project MainCore.Test --no-restore
 dotnet publish WPFUI/WPFUI.csproj --no-restore -c Release --self-contained true -p:PublishSingleFile=true
 ```
 
-The 15-test suite checks hosting, repeated refreshes, restarts, additional attacked villages, grouped attacks, clear/rearm, missing pages, separate accounts, failures, corrupt state, concurrent refreshes, real parser output mapping and Windows-encrypted credentials. Call clients are simulated; the tests never place phone calls.
+Tests cover repeated refreshes, restarts, grouped attacks, clear/rearm, partial pages, separate accounts, failures, corrupt state, concurrent refreshes, parser mapping, queue ordering and Windows-encrypted credentials. The HTTP client is exercised against a mock transport; tests never place phone calls.

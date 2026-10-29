@@ -24,6 +24,12 @@ namespace WPFUI.Views.Tabs.Villages
                 this.BindCommand(ViewModel, vm => vm.ImportCommand, v => v.ImportButton).DisposeWith(d);
                 this.BindCommand(ViewModel, vm => vm.SaveCommand, v => v.SaveButton).DisposeWith(d);
 
+                this.Bind(ViewModel, vm => vm.VillageSettingInput.AutoBuildEnable, v => v.AutoBuildEnable.IsChecked).DisposeWith(d);
+                this.Bind(ViewModel, vm => vm.VillageSettingInput.ConfirmedCapital, v => v.ConfirmedCapital.IsChecked).DisposeWith(d);
+                this.Bind(ViewModel, vm => vm.VillageSettingInput.ResourceEvasionEnable, v => v.ResourceEvasionEnable.IsChecked).DisposeWith(d);
+                this.Bind(ViewModel, vm => vm.VillageSettingInput.TroopEvasionEnable, v => v.TroopEvasionEnable.IsChecked).DisposeWith(d);
+                this.OneWayBind(ViewModel, vm => vm.EvasionDestinations, v => v.EvasionDestination.ItemsSource).DisposeWith(d);
+                this.Bind(ViewModel, vm => vm.VillageSettingInput.EvasionDestinationId, v => v.EvasionDestination.SelectedValue).DisposeWith(d);
                 this.Bind(ViewModel, vm => vm.VillageSettingInput.UseHeroResourceForBuilding, v => v.UseHeroResForBuilding.IsChecked).DisposeWith(d);
                 this.Bind(ViewModel, vm => vm.VillageSettingInput.ApplyRomanQueueLogicWhenBuilding, v => v.UseRomanQueueLogic.IsChecked).DisposeWith(d);
                 this.Bind(ViewModel, vm => vm.VillageSettingInput.UseSpecialUpgrade, v => v.UseSpecialUpgrade.IsChecked).DisposeWith(d);

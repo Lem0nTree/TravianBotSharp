@@ -14,6 +14,8 @@ namespace MainCore.Services
 
         public IReadOnlyCollection<VillageDto> MarkNewAttacks(AccountId accountId, IReadOnlyCollection<VillageDto> villages)
         {
+            if (accountId.Value <= 0 || villages.Any(v => v.Id.Value <= 0))
+                throw new InvalidDataException("Attack observation contains invalid account or village data.");
             lock (_sync)
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
@@ -22,6 +24,8 @@ namespace MainCore.Services
                     ? JsonSerializer.Deserialize<Dictionary<int, HashSet<int>>>(File.ReadAllText(path))
                         ?? throw new InvalidDataException("Attack state file is invalid.")
                     : [];
+                if (states.Any(entry => entry.Key <= 0 || entry.Value is null || entry.Value.Any(id => id <= 0)))
+                    throw new InvalidDataException("Attack state file contains invalid account or village data.");
                 var known = states.GetValueOrDefault(accountId.Value) ?? [];
                 var previous = new HashSet<int>(known);
                 // Only an explicit clear flag rearms a village; missing/partial pages do not.

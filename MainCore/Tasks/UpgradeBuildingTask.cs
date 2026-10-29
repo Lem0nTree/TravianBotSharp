@@ -1,6 +1,7 @@
 ﻿using MainCore.Commands.Features.UpgradeBuilding;
 using MainCore.Commands.Update;
 using MainCore.Tasks.Base;
+using MainCore.Services.Evasion;
 
 namespace MainCore.Tasks
 {
@@ -12,7 +13,8 @@ namespace MainCore.Tasks
         ToBuildPageCommand.Handler toBuildPageCommand,
         HandleResourceCommand.Handler handleResourceCommand,
         HandleUpgradeCommand.Handler handleUpgradeCommand,
-        UpdateBuildingCommand.Handler updateBuildingCommand)
+        UpdateBuildingCommand.Handler updateBuildingCommand,
+        TaskManager taskManager)
     {
         public sealed class Task(AccountId accountId, VillageId villageId) : VillageTask(accountId, villageId)
         {
@@ -48,7 +50,10 @@ namespace MainCore.Tasks
                 if (result.IsFailed)
                 {
                     if (result.HasError<LackOfFreeCrop>())
+                    {
+                        if (ShouldYield(task)) { task.ExecuteAt = DateTime.Now; return Result.Ok(); }
                         continue;
+                    }
 
                     if (result.HasError<StorageLimit>())
                     {
@@ -71,7 +76,11 @@ namespace MainCore.Tasks
 
                 result = await updateBuildingCommand.HandleAsync(new(task.VillageId), cancellationToken);
                 if (result.IsFailed) return result;
+                if (ShouldYield(task)) { task.ExecuteAt = DateTime.Now; return Result.Ok(); }
             }
         }
+
+        private bool ShouldYield(Task task) => taskManager.GetTaskList(task.AccountId)
+            .Any(x => x is IEvasionTask && x.ExecuteAt <= DateTime.Now.AddSeconds(25));
     }
 }

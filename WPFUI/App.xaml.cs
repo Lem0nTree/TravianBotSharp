@@ -32,7 +32,6 @@ namespace WPFUI
         /// <param name="e">A <see cref="StartupEventArgs"/> that contains the event data.</param>
         protected override async void OnStartup(StartupEventArgs e)
         {
-            System.IO.Directory.SetCurrentDirectory(AppContext.BaseDirectory);
             base.OnStartup(e);
             var hostBuilder = AppMixins.GetHostBuilder()
                 .ConfigureSplatForMicrosoftDependencyResolver()

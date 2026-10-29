@@ -32,7 +32,6 @@ namespace MainCore.UI.ViewModels.Tabs.Villages
         public ListBoxItemViewModel Buildings { get; } = new();
         public ListBoxItemViewModel Queue { get; } = new();
         public ListBoxItemViewModel Jobs { get; } = new();
-
         public BuildViewModel(DialogService dialogService, IValidator<NormalBuildInput> normalBuildInputValidator, IValidator<ResourceBuildInput> resourceBuildInputValidator, TaskManager taskManager, RxQueue rxQueue, IDbContextFactory<AppDbContext> contextFactory)
         {
             _dialogService = dialogService;
@@ -98,8 +97,8 @@ namespace MainCore.UI.ViewModels.Tabs.Villages
             if (notification.AccountId != AccountId) return;
 
             using var context = _contextFactory.CreateDbContext();
-            var task = new CompleteImmediatelyTask.Task(AccountId, notification.VillageId);
-            if (task.CanStart(context) && !_taskManager.IsExist<CompleteImmediatelyTask.Task>(AccountId, notification.VillageId))
+            var task = new InstantUpgradeTask.Task(AccountId, notification.VillageId);
+            if (task.CanStart(context) && !_taskManager.IsExist<InstantUpgradeTask.Task>(AccountId, notification.VillageId))
             {
                 _taskManager.Add(task);
             }

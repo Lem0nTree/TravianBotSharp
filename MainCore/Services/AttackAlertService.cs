@@ -8,7 +8,7 @@ namespace MainCore.Services
     {
         private int _warned;
 
-        public async Task CheckAsync(AccountId accountId, IReadOnlyCollection<VillageDto> villages, CancellationToken cancellationToken = default)
+        public async Task CheckAsync(AccountId accountId, IReadOnlyCollection<VillageDto> villages, CancellationToken cancellationToken = default, bool allowCall = true)
         {
             if (!settings.Enabled || villages.Count == 0) return;
             var logger = Serilog.Log.ForContext<AttackAlertService>();
@@ -24,12 +24,12 @@ namespace MainCore.Services
                 cancellationToken.ThrowIfCancellationRequested();
                 // Persist BEFORE the request: restarts and ambiguous timeouts must not redial it.
                 var newlyAttacked = stateStore.MarkNewAttacks(accountId, villages);
-                if (newlyAttacked.Count == 0) return;
-                var callSid = await callClient.CallAsync(newlyAttacked, cancellationToken);
-                logger.Warning("New attack detected in {Count} village(s). Twilio accepted call {CallSid}.", newlyAttacked.Count, callSid);
+                if (newlyAttacked.Count == 0 || !allowCall) return;
+                await callClient.CallAsync(newlyAttacked, cancellationToken);
+                logger.Warning("New attack detected in {Count} village(s). Twilio accepted the call request.", newlyAttacked.Count);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException
+            catch (Exception exception) when (exception is IOException or InvalidDataException or UnauthorizedAccessException or JsonException
                 or HttpRequestException or OperationCanceledException or KeyNotFoundException or InvalidOperationException)
             {
                 logger.Warning("Attack call could not be confirmed ({ErrorType}). Check local state/settings and Twilio Voice logs. The same ongoing attack is not automatically redialed.", exception.GetType().Name);

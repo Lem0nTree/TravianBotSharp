@@ -116,6 +116,37 @@ namespace MainCore.Test
         }
 
         [Theory]
+        [InlineData("{\"1\":null}")]
+        [InlineData("{\"0\":[1]}")]
+        [InlineData("{\"1\":[0]}")]
+        public async Task StructurallyInvalidStateDoesNotResetEpisodesOrPlaceCalls(string state)
+        {
+            File.WriteAllText(StatePath, state);
+            await Service().CheckAsync(_account, [Village(1)], TestContext.Current.CancellationToken);
+            _calls.Requests.ShouldBeEmpty();
+            File.ReadAllText(StatePath).ShouldBe(state);
+        }
+
+        [Fact]
+        public async Task InvalidVillageObservationCannotWriteStateOrPlaceCall()
+        {
+            await Service().CheckAsync(_account, [Village(0)], TestContext.Current.CancellationToken);
+            _calls.Requests.ShouldBeEmpty();
+            File.Exists(StatePath).ShouldBeFalse();
+        }
+
+        [Fact]
+        public void BadSettingsOrEncryptedTokenDisableAlerts()
+        {
+            File.WriteAllText(Path.Combine(_directory, "twilio-alerts.local.json"), "not json");
+            TwilioAttackAlertSettings.Load(_directory, useEnvironment: false).Enabled.ShouldBeFalse();
+            File.WriteAllText(Path.Combine(_directory, "twilio-alerts.local.json"),
+                JsonSerializer.Serialize(new { Enabled = true, ToNumber = "+393000000000", AccountSid = "AC" + new string('a', 32), FromNumber = "+15005550006" }));
+            File.WriteAllBytes(Path.Combine(_directory, "twilio-auth.local.dpapi"), [1, 2, 3]);
+            TwilioAttackAlertSettings.Load(_directory, useEnvironment: false).Enabled.ShouldBeFalse();
+        }
+
+        [Theory]
         [InlineData(false, true)]
         [InlineData(true, false)]
         public async Task DisabledOrUnconfiguredAlertsDoNotMarkStateOrCall(bool enabled, bool configured)
@@ -140,7 +171,7 @@ namespace MainCore.Test
         public async Task RealParserPreservesAttackAndActiveFlagsFromBrowserJson()
         {
             var page = Substitute.For<IPage>();
-            using var document = JsonDocument.Parse("[{\"IdStr\":\"123\",\"Name\":\"Home\",\"CoordinateX\":\"1\",\"CoordinateY\":\"2\",\"IsActive\":true,\"IsUnderAttack\":true}]");
+            using var document = JsonDocument.Parse("[{\"IdStr\":\"123\",\"Name\":\"Home\",\"CoordinateX\":\"1\",\"CoordinateY\":\"2\",\"Active\":true,\"UnderAttack\":true}]");
             page.EvaluateAsync<JsonElement>(Arg.Any<string>(), Arg.Any<object?>()).Returns(document.RootElement.Clone());
             var villages = await VillagePanelParser.Get(page);
             villages.Single().IsUnderAttack.ShouldBeTrue();
@@ -157,7 +188,7 @@ namespace MainCore.Test
             var protectedToken = ProtectedData.Protect(Encoding.UTF8.GetBytes("fake-unit-test-token"),
                 Encoding.UTF8.GetBytes("TravianBotSharp-Twilio-v1"), DataProtectionScope.CurrentUser);
             File.WriteAllBytes(Path.Combine(_directory, "twilio-auth.local.dpapi"), protectedToken);
-            var settings = TwilioAttackAlertSettings.Load(_directory);
+            var settings = TwilioAttackAlertSettings.Load(_directory, useEnvironment: false);
             settings.IsConfigured.ShouldBeTrue();
             settings.AuthToken.ShouldBe("fake-unit-test-token");
             settings.ToNumber.ShouldBe("+393000000000");

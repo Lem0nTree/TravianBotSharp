@@ -38,14 +38,18 @@ namespace MainCore
                     .Enrich.FromLogContext());
             });
 
-        private const string _connectionString = "DataSource=TBS.db;Cache=Shared";
+        public static string DatabaseConnectionString(string executableDirectory)
+        {
+            var databasePath = Path.Combine(Path.GetFullPath(executableDirectory), "TBS.db");
+            return new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder { DataSource = databasePath, Cache = Microsoft.Data.Sqlite.SqliteCacheMode.Shared }.ToString();
+        }
 
         private static IHostBuilder ConfigureDbContext(this IHostBuilder hostBuilder) =>
             hostBuilder.ConfigureServices((hostContext, services) =>
             {
                 services.AddPooledDbContextFactory<AppDbContext>(options => options
                     .EnableSensitiveDataLogging(hostContext.HostingEnvironment.IsDevelopment())
-                    .UseSqlite(_connectionString, o => o.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery)));
+                    .UseSqlite(DatabaseConnectionString(AppContext.BaseDirectory), o => o.UseQuerySplittingBehavior(QuerySplittingBehavior.SplitQuery)));
             });
 
         public static IHostBuilder ConfigureServices(this IHostBuilder hostBuilder) =>
@@ -53,12 +57,14 @@ namespace MainCore
             {
                 services.AddMainCore();
                 services.AddSingleton(_ => TwilioAttackAlertSettings.Load());
-                services.AddSingleton<IAttackAlertStateStore>(_ => new AttackAlertStateStore(
-                    Path.Combine(AppContext.BaseDirectory, "Data", "twilio-attack-state.json")));
-                services.AddSingleton<ITwilioCallClient>(sp => new TwilioCallClient(
-                    new HttpClient { Timeout = TimeSpan.FromSeconds(15) }, sp.GetRequiredService<TwilioAttackAlertSettings>()));
+                services.AddSingleton<IAttackAlertStateStore>(_ => new AttackAlertStateStore(Path.Combine(AppContext.BaseDirectory, "Data", "twilio-attack-state.json")));
+                services.AddSingleton<ITwilioCallClient>(sp => new TwilioCallClient(new HttpClient { Timeout = TimeSpan.FromSeconds(15) }, sp.GetRequiredService<TwilioAttackAlertSettings>()));
+                services.AddSingleton(sp => new AttackAlertWorker(sp.GetRequiredService<AttackAlertService>(), sp.GetRequiredService<TwilioAttackAlertSettings>()));
+                services.AddHostedService(sp => sp.GetRequiredService<AttackAlertWorker>());
                 services.AddValidatorsFromAssembly(typeof(AppMixins).Assembly, ServiceLifetime.Singleton);
                 services.AddMainCoreHandlers();
+                services.AddSingleton<MainCore.Services.Telegram.ITelegramTransport>(_ => new MainCore.Services.Telegram.TelegramApiClient());
+                services.AddHostedService(sp => sp.GetRequiredService<MainCore.Services.Telegram.TelegramNotificationService>());
 
                 services.AddScoped(sp =>
                 {
@@ -69,10 +75,8 @@ namespace MainCore
                         .ForContext("Account", dataService.AccountData)
                         .ForContext("AccountId", dataService.AccountId);
 
-                    var delayService = sp.GetRequiredService<DelayService>();
                     var browser = chromeManager.Get(dataService.AccountId);
                     browser.Logger = logger;
-                    browser.DelayService = delayService;
 
                     return browser;
                 });

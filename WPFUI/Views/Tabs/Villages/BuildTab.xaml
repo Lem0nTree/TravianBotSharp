@@ -9,6 +9,7 @@
     mc:Ignorable="d"
     d:DesignHeight="450" d:DesignWidth="800"
     xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes">
+    <DockPanel>
     <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="*" />
@@ -150,4 +151,5 @@
             </Border>
         </Grid>
     </Grid>
+    </DockPanel>
 </v:BuildTabBase>

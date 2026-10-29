@@ -1,22 +1,23 @@
-﻿using MainCore.Commands.Navigate;
-using MainCore.Commands.Update;
+﻿using MainCore.Commands.Features;
+using MainCore.Commands.Navigate;
 using MainCore.Infrasturecture.Extensions;
 using MainCore.Tasks.Base;
+using MainCore.Services.Evasion;
 
 namespace MainCore.Tasks
 {
     [Handler]
     public sealed partial class TrainTroopTask(
         IDbContextFactory<AppDbContext> contextFactory,
-        IChromeBrowser browser,
-        ToDorfCommand.Handler toDorfCommand,
-        UpdateBuildingCommand.Handler updateBuildingCommand,
         ToBuildingByTypeCommand.Handler toBuildingCommand,
-        ILogger logger)
+        TrainTroopCommand.Handler trainTroopCommand,
+        ILogger logger,
+        TaskManager taskManager)
     {
         public sealed class Task(AccountId accountId, VillageId villageId) : VillageTask(accountId, villageId)
         {
             protected override string TaskName => "Train troop";
+            internal HashSet<BuildingEnums> CompletedBuildings { get; } = [];
 
             public override bool CanStart(AppDbContext context)
             {
@@ -34,15 +35,17 @@ namespace MainCore.Tasks
 
             foreach (var building in buildings)
             {
+                if (task.CompletedBuildings.Contains(building)) continue;
                 if (cancellationToken.IsCancellationRequested) return Cancel.Error;
 
-                result = await ToTrainTroopPage(task.VillageId, building, cancellationToken);
+                result = await toBuildingCommand.HandleAsync(new(task.VillageId, building), cancellationToken);
                 if (result.IsFailed)
                 {
                     if (result.HasError<MissingBuilding>())
                     {
                         logger.Warning("Disable train troop on {Building} because the building is missing.", building);
                         settings.Add(TroopSettings[building], 0);
+                        task.CompletedBuildings.Add(building);
                         continue;
                     }
                     SaveSetting(task, settings);
@@ -50,7 +53,9 @@ namespace MainCore.Tasks
                     return result;
                 }
 
-                result = await TrainTroop(task.VillageId, building);
+                var (troop, amount) = GetTroopDataToTrain(task.VillageId, building);
+                var trainWhenLowResource = TrainWhenLowResource(task.VillageId);
+                result = await trainTroopCommand.HandleAsync(new(troop, amount, trainWhenLowResource), cancellationToken);
                 if (result.IsFailed)
                 {
                     if (result.HasError<MissingResource>())
@@ -59,15 +64,20 @@ namespace MainCore.Tasks
                     }
 
                     SaveSetting(task, settings);
-
                     return result;
+                }
+                task.CompletedBuildings.Add(building);
+                if (taskManager.GetTaskList(task.AccountId).Any(x => x is IEvasionTask && x.ExecuteAt <= DateTime.Now.AddSeconds(25)))
+                {
+                    SaveSetting(task, settings);
+                    task.ExecuteAt = DateTime.Now;
+                    return Result.Ok();
                 }
             }
 
             SaveSetting(task, settings);
-
+            task.CompletedBuildings.Clear();
             task.ExecuteAt = GetNextExecute(task.VillageId);
-
             return Result.Ok();
         }
 
@@ -75,19 +85,6 @@ namespace MainCore.Tasks
         {
             using var context = contextFactory.CreateDbContext();
             context.SaveVillageSetting(task.VillageId, settings);
-        }
-
-        private async ValueTask<Result> ToTrainTroopPage(VillageId villageId, BuildingEnums building, CancellationToken cancellationToken)
-        {
-            var result = await toDorfCommand.HandleAsync(new(2), cancellationToken);
-            if (result.IsFailed) return result;
-
-            var (_, isFailed, errors) = await updateBuildingCommand.HandleAsync(new(villageId), cancellationToken);
-            if (isFailed) return Result.Fail(errors);
-
-            result = await toBuildingCommand.HandleAsync(new(villageId, building), cancellationToken);
-            if (result.IsFailed) return result;
-            return Result.Ok();
         }
 
         private List<BuildingEnums> GetTrainTroopBuildings(VillageId villageId)
@@ -157,18 +154,6 @@ namespace MainCore.Tasks
             {BuildingEnums.Workshop, (VillageSettingEnums.WorkshopAmountMin,VillageSettingEnums.WorkshopAmountMax ) },
         };
 
-        private async ValueTask<Result> Train(TroopEnums troop, long amount)
-        {
-            Result result;
-            result = await browser.Input(TrainTroopParser.GetInputBox(browser.CurrentPage, troop), $"{amount}");
-            if (result.IsFailed) return result;
-
-            result = await browser.Click(TrainTroopParser.GetTrainButton(browser.CurrentPage));
-            if (result.IsFailed) return result;
-
-            return Result.Ok();
-        }
-
         private (TroopEnums troop, int amount) GetTroopDataToTrain(VillageId villageId, BuildingEnums building)
         {
             using var context = contextFactory.CreateDbContext();
@@ -182,27 +167,6 @@ namespace MainCore.Tasks
         {
             using var context = contextFactory.CreateDbContext();
             return context.BooleanByName(villageId, VillageSettingEnums.TrainWhenLowResource);
-        }
-
-        private async ValueTask<Result> TrainTroop(VillageId villageId, BuildingEnums building)
-        {
-            var (troop, amount) = GetTroopDataToTrain(villageId, building);
-            var maxAmount = await TrainTroopParser.GetMaxAmount(browser.CurrentPage, troop);
-            if (maxAmount == 0)
-            {
-                return MissingResource.Error(troop);
-            }
-
-            if (amount > maxAmount && !TrainWhenLowResource(villageId))
-            {
-                return MissingResource.Error(troop);
-            }
-
-            var result = await Train(troop, amount);
-            if (result.IsFailed) return result;
-
-            logger.Information("Troop training for {Troop} with amount {Amount} is done.", troop, amount);
-            return Result.Ok();
         }
     }
 }

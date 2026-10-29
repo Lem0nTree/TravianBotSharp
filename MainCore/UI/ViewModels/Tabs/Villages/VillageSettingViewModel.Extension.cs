@@ -4,19 +4,34 @@ namespace MainCore.UI.ViewModels.Tabs.Villages
     {
         public static void TriggerTask(this AppDbContext context, TaskManager taskManager, AccountId accountId, VillageId villageId, Dictionary<VillageSettingEnums, int> settings)
         {
+            if (settings.ContainsKey(VillageSettingEnums.ResourceEvasionEnable) || settings.ContainsKey(VillageSettingEnums.TroopEvasionEnable))
+            {
+                var scan = new EvasionScanTask.Task(accountId, villageId);
+                if (scan.CanStart(context) && !taskManager.IsExist<EvasionScanTask.Task>(accountId, villageId))
+                    taskManager.Add(scan);
+                else if (!scan.CanStart(context))
+                    taskManager.Remove<EvasionScanTask.Task>(accountId, villageId);
+            }
+            if (settings.TryGetValue(VillageSettingEnums.AutoBuildEnable, out var autoBuild))
+            {
+                if (autoBuild == 1 && !taskManager.IsExist<AutoBuildTask.Task>(accountId, villageId))
+                    taskManager.Add(new AutoBuildTask.Task(accountId, villageId));
+                else if (autoBuild != 1)
+                    taskManager.Remove<AutoBuildTask.Task>(accountId, villageId);
+            }
             if (settings.ContainsKey(VillageSettingEnums.CompleteImmediately))
             {
                 if (settings[VillageSettingEnums.CompleteImmediately] == 1)
                 {
-                    var task = new CompleteImmediatelyTask.Task(accountId, villageId);
-                    if (task.CanStart(context) && !taskManager.IsExist<CompleteImmediatelyTask.Task>(accountId, villageId))
+                    var task = new InstantUpgradeTask.Task(accountId, villageId);
+                    if (task.CanStart(context) && !taskManager.IsExist<InstantUpgradeTask.Task>(accountId, villageId))
                     {
                         taskManager.Add(task);
                     }
                 }
                 else
                 {
-                    taskManager.Remove<CompleteImmediatelyTask.Task>(accountId, villageId);
+                    taskManager.Remove<InstantUpgradeTask.Task>(accountId, villageId);
                 }
             }
 
@@ -72,15 +87,15 @@ namespace MainCore.UI.ViewModels.Tabs.Villages
             {
                 if (settings[VillageSettingEnums.AutoClaimQuestEnable] == 1)
                 {
-                    var task = new ClaimQuestTask.Task(accountId, villageId);
-                    if (task.CanStart(context) && !taskManager.IsExist<ClaimQuestTask.Task>(accountId, villageId))
+                    var task = new ClaimVillageQuestTask.Task(accountId, villageId);
+                    if (task.CanStart(context) && !taskManager.IsExist<ClaimVillageQuestTask.Task>(accountId, villageId))
                     {
                         taskManager.Add(task);
                     }
                 }
                 else
                 {
-                    taskManager.Remove<ClaimQuestTask.Task>(accountId, villageId);
+                    taskManager.Remove<ClaimVillageQuestTask.Task>(accountId, villageId);
                 }
             }
         }

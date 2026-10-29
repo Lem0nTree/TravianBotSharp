@@ -1,5 +1,8 @@
 using System.Collections.Concurrent;
 
+using MainCore.Infrasturecture.Extensions;
+using MainCore.Services.Evasion;
+
 using Microsoft.Extensions.DependencyInjection;
 
 using Polly;
@@ -17,15 +20,17 @@ namespace MainCore.Services
         private readonly TaskManager _taskManager;
         private readonly RxQueue _rxQueue;
         private readonly CustomServiceScopeFactory _serviceScopeFactory;
+        private readonly IDbContextFactory<AppDbContext> _contextFactory;
 
         private static readonly ResiliencePropertyKey<ContextData> contextDataKey = new(nameof(ContextData));
         private readonly ResiliencePipeline<Result> _pipeline;
 
-        public TimerManager(TaskManager taskManager, CustomServiceScopeFactory serviceScopeFactory, RxQueue rxQueue)
+        public TimerManager(TaskManager taskManager, CustomServiceScopeFactory serviceScopeFactory, RxQueue rxQueue, IDbContextFactory<AppDbContext> contextFactory)
         {
             _taskManager = taskManager;
             _serviceScopeFactory = serviceScopeFactory;
             _rxQueue = rxQueue;
+            _contextFactory = contextFactory;
 
             static async ValueTask OnRetry(OnRetryArguments<Result> args)
             {
@@ -74,11 +79,13 @@ namespace MainCore.Services
 
             var status = taskQueue.Status;
             if (status != StatusEnums.Online) return;
-            var tasks = taskQueue.Tasks.OrderBy(x => x.ExecuteAt).ToList();
-            if (tasks.Count == 0) return;
-            var task = tasks[0];
-
-            if (task.ExecuteAt > DateTime.Now) return;
+            var task = EvasionScheduling.Select(taskQueue.Tasks, DateTime.Now, TimeSpan.FromSeconds(20));
+            if (task is null) return;
+            bool evasionEnabled;
+            using (var settingsDb = _contextFactory.CreateDbContext())
+                evasionEnabled = settingsDb.VillagesSetting.Any(s => s.Value == 1 &&
+                    (s.Setting == VillageSettingEnums.ResourceEvasionEnable || s.Setting == VillageSettingEnums.TroopEvasionEnable) &&
+                    settingsDb.Villages.Any(v => v.Id == s.VillageId && v.AccountId == accountId.Value));
 
             taskQueue.IsExecuting = true;
             var cts = new CancellationTokenSource();
@@ -98,16 +105,27 @@ namespace MainCore.Services
             var contextData = new ContextData(task.Description, browser);
 
             ///===========================================================///
-            var context = ResilienceContextPool.Shared.Get(cts.Token);
+            var resilienceContext = ResilienceContextPool.Shared.Get(cts.Token);
 
-            context.Properties.Set(contextDataKey, contextData);
+            resilienceContext.Properties.Set(contextDataKey, contextData);
 
-            var poliResult = await _pipeline.ExecuteOutcomeAsync(
-                async (ctx, state) => Outcome.FromResult(await scope.Execute(state, ctx.CancellationToken)),
-                context,
-                task);
+            Outcome<Result> poliResult;
+            if (task is IEvasionTask || evasionEnabled)
+            {
+                // A timed mutation can have an ambiguous outcome; never apply the
+                // generic retry pipeline to it.
+                try { poliResult = Outcome.FromResult(await scope.Execute(task, cts.Token)); }
+                catch (Exception ex) { poliResult = Outcome.FromException<Result>(ex); }
+            }
+            else
+            {
+                poliResult = await _pipeline.ExecuteOutcomeAsync(
+                    async (ctx, state) => Outcome.FromResult(await scope.Execute(state, ctx.CancellationToken)),
+                    resilienceContext,
+                    task);
+            }
 
-            ResilienceContextPool.Shared.Return(context);
+            ResilienceContextPool.Shared.Return(resilienceContext);
             ///===========================================================///
 
             task.Stage = StageEnums.Waiting;
@@ -142,8 +160,16 @@ namespace MainCore.Services
                 var result = poliResult.Result;
                 if (result.IsFailed)
                 {
-                    if (result.HasError<Stop>() || result.HasError<Retry>())
+                    if (result.HasError<Retry>() && evasionEnabled && task is not IEvasionTask)
                     {
+                        task.ExecuteAt = DateTime.Now.AddSeconds(30);
+                        logger.Warning("Task {TaskName} postponed after a retryable error so attack scans can run.", task.Description);
+                    }
+                    else if (result.HasError<Stop>() || result.HasError<Retry>())
+                    {
+                        _rxQueue.Enqueue(new MainCore.Services.Telegram.TelegramAlert(accountId, null,
+                            MainCore.Services.Telegram.TelegramEvents.Errors,
+                            "A task failed and the bot is pausing. Open the account's bot log for details.", "error"));
                         var filename = await browser.Screenshot();
                         logger.Information(messageTemplate: "Screenshot saved as {FileName}", filename);
                         _taskManager.SetStatus(accountId, StatusEnums.Paused);
@@ -177,8 +203,10 @@ namespace MainCore.Services
                 }
             }
 
-            var delayService = scope.ServiceProvider.GetRequiredService<DelayService>();
-            await delayService.DelayTask();
+            if (task is IEvasionTask || taskQueue.Tasks.Any(x => x is IEvasionTask && x.ExecuteAt <= DateTime.Now.AddSeconds(20))) return;
+            using var context = _contextFactory.CreateDbContext();
+            var delay = context.ByName(accountId, AccountSettingEnums.TaskDelayMin, AccountSettingEnums.TaskDelayMax);
+            await Task.Delay(delay);
         }
 
         public void Shutdown()

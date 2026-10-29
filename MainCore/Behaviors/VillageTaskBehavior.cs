@@ -1,6 +1,7 @@
 ﻿using MainCore.Commands.Navigate;
 using MainCore.Commands.Update;
 using MainCore.Tasks.Base;
+using MainCore.Services.Evasion;
 
 namespace MainCore.Behaviors
 {
@@ -16,6 +17,7 @@ namespace MainCore.Behaviors
     {
         public override async ValueTask<TResponse> HandleAsync(TRequest request, CancellationToken cancellationToken)
         {
+            if (request is IEvasionTask) return await Next(request, cancellationToken);
             var (accountId, villageId) = request;
 
             var (_, isFailed, errors) = await switchVillageCommand.HandleAsync(new(villageId), cancellationToken);

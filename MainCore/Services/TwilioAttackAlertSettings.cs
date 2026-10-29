@@ -13,7 +13,7 @@ namespace MainCore.Services
         public string AuthToken { get; init; } = "";
         public string FromNumber { get; init; } = "";
 
-        public static TwilioAttackAlertSettings Load(string? directory = null)
+        public static TwilioAttackAlertSettings Load(string? directory = null, bool useEnvironment = true)
         {
             directory ??= AppContext.BaseDirectory;
             var path = Path.Combine(directory, "twilio-alerts.local.json");
@@ -25,11 +25,11 @@ namespace MainCore.Services
                 {
                     Enabled = json.RootElement.GetProperty("Enabled").GetBoolean(),
                     ToNumber = json.RootElement.GetProperty("ToNumber").GetString() ?? "",
-                    AccountSid = Environment.GetEnvironmentVariable("TWILIO_ACCOUNT_SID")
+                    AccountSid = (useEnvironment ? Environment.GetEnvironmentVariable("TWILIO_ACCOUNT_SID") : null)
                         ?? (json.RootElement.TryGetProperty("AccountSid", out var sid) ? sid.GetString() : "") ?? "",
-                    FromNumber = Environment.GetEnvironmentVariable("TWILIO_FROM_NUMBER")
+                    FromNumber = (useEnvironment ? Environment.GetEnvironmentVariable("TWILIO_FROM_NUMBER") : null)
                         ?? (json.RootElement.TryGetProperty("FromNumber", out var from) ? from.GetString() : "") ?? "",
-                    AuthToken = ReadToken(directory),
+                    AuthToken = ReadToken(directory, useEnvironment),
                 };
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException
@@ -40,9 +40,9 @@ namespace MainCore.Services
             }
         }
 
-        private static string ReadToken(string directory)
+        private static string ReadToken(string directory, bool useEnvironment)
         {
-            var token = Environment.GetEnvironmentVariable("TWILIO_AUTH_TOKEN");
+            var token = useEnvironment ? Environment.GetEnvironmentVariable("TWILIO_AUTH_TOKEN") : null;
             if (!string.IsNullOrWhiteSpace(token)) return token;
             var path = Path.Combine(directory, "twilio-auth.local.dpapi");
             if (!File.Exists(path)) return "";

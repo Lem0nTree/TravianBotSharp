@@ -11,12 +11,12 @@ namespace MainCore.Commands.Update
         RxQueue rxQueue,
         TaskManager taskManager,
         DefaultTemplatePathStore defaultTemplatePathStore,
-        AttackAlertService attackAlerts)
+        AttackAlertWorker attackAlerts)
     {
         public sealed record Command(AccountId AccountId) : IAccountCommand;
 
         private async ValueTask HandleAsync(
-            Command command, CancellationToken cancellationToken)
+            Command command)
         {
             await Task.CompletedTask;
             var accountId = command.AccountId;
@@ -24,8 +24,11 @@ namespace MainCore.Commands.Update
             var dtos = await VillagePanelParser.Get(browser.CurrentPage);
             if (dtos.Count == 0) return;
 
+            attackAlerts.Publish(accountId, dtos);
+
             UpdateToDatabase(accountId, dtos);
-            await attackAlerts.CheckAsync(accountId, dtos, cancellationToken);
+            foreach (var village in dtos)
+                rxQueue.Enqueue(new MainCore.Services.Telegram.TelegramVillageScan(accountId, village.Id, UnderAttack: village.IsUnderAttack));
             rxQueue.Enqueue(new VillagesModified(accountId));
             TriggerUpdateBuildingTask(accountId);
         }
@@ -94,6 +97,10 @@ namespace MainCore.Commands.Update
                 if (settings.Count == 0) return;
 
                 settings.Remove(VillageSettingEnums.Tribe);
+                settings.Remove(VillageSettingEnums.ConfirmedCapitalStatus);
+                settings.Remove(VillageSettingEnums.ResourceEvasionEnable);
+                settings.Remove(VillageSettingEnums.TroopEvasionEnable);
+                settings.Remove(VillageSettingEnums.EvasionDestinationId);
                 context.SaveVillageSetting(villageId, settings);
             }
             catch

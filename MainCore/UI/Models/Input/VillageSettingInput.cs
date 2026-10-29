@@ -8,6 +8,16 @@ namespace MainCore.UI.Models.Input
     public partial class VillageSettingInput : ViewModelBase
     {
         [Reactive]
+        private bool _autoBuildEnable;
+        [Reactive]
+        private bool? _confirmedCapital;
+        [Reactive]
+        private bool _resourceEvasionEnable;
+        [Reactive]
+        private bool _troopEvasionEnable;
+        [Reactive]
+        private int _evasionDestinationId;
+        [Reactive]
         private bool _useHeroResourceForBuilding;
 
         [Reactive]
@@ -62,6 +72,11 @@ namespace MainCore.UI.Models.Input
 
         public void Set(Dictionary<VillageSettingEnums, int> settings)
         {
+            AutoBuildEnable = settings.GetValueOrDefault(VillageSettingEnums.AutoBuildEnable) == 1;
+            ConfirmedCapital = settings.GetValueOrDefault(VillageSettingEnums.ConfirmedCapitalStatus) switch { 1 => true, 2 => false, _ => null };
+            ResourceEvasionEnable = settings.GetValueOrDefault(VillageSettingEnums.ResourceEvasionEnable) == 1;
+            TroopEvasionEnable = settings.GetValueOrDefault(VillageSettingEnums.TroopEvasionEnable) == 1;
+            EvasionDestinationId = settings.GetValueOrDefault(VillageSettingEnums.EvasionDestinationId);
             var tribe = (TribeEnums)settings.GetValueOrDefault(VillageSettingEnums.Tribe);
             Tribe.Set(tribe);
 
@@ -155,6 +170,11 @@ namespace MainCore.UI.Models.Input
 
             var settings = new Dictionary<VillageSettingEnums, int>()
             {
+                { VillageSettingEnums.AutoBuildEnable, AutoBuildEnable ? 1 : 0 },
+                { VillageSettingEnums.ConfirmedCapitalStatus, ConfirmedCapital == true ? 1 : ConfirmedCapital == false ? 2 : 0 },
+                { VillageSettingEnums.ResourceEvasionEnable, ResourceEvasionEnable ? 1 : 0 },
+                { VillageSettingEnums.TroopEvasionEnable, TroopEvasionEnable ? 1 : 0 },
+                { VillageSettingEnums.EvasionDestinationId, EvasionDestinationId },
                 { VillageSettingEnums.UseHeroResourceForBuilding, useHeroResourceForBuilding },
                 { VillageSettingEnums.ApplyRomanQueueLogicWhenBuilding, applyRomanQueueLogicWhenBuilding },
                 { VillageSettingEnums.UseSpecialUpgrade, useSpecialUpgrade },

@@ -23,11 +23,19 @@ namespace MainCore.Infrasturecture.Persistence
         public DbSet<Building> Buildings { get; set; }
         public DbSet<QueueBuilding> QueueBuildings { get; set; }
         public DbSet<Job> Jobs { get; set; }
+        public DbSet<EvasionDispatch> EvasionDispatches { get; set; }
         public DbSet<Storage> Storages { get; set; }
         public DbSet<VillageSetting> VillagesSetting { get; set; }
         public DbSet<Farm> FarmLists { get; set; }
 
         #endregion table
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            modelBuilder.Entity<EvasionDispatch>().HasKey(x => new { x.AccountId, x.VillageId, x.AttackId, x.Kind });
+            modelBuilder.Entity<EvasionDispatch>().HasIndex(x => new { x.AccountId, x.VillageId, x.Kind, x.MovementId }).IsUnique();
+            base.OnModelCreating(modelBuilder);
+        }
 
         #region account setting
 
@@ -105,6 +113,11 @@ namespace MainCore.Infrasturecture.Persistence
 
         public static readonly ImmutableDictionary<VillageSettingEnums, int> VillageDefaultSettings = new Dictionary<VillageSettingEnums, int>
         {
+            {VillageSettingEnums.AutoBuildEnable, 0 },
+            {VillageSettingEnums.ConfirmedCapitalStatus, 0 },
+            {VillageSettingEnums.ResourceEvasionEnable, 0 },
+            {VillageSettingEnums.TroopEvasionEnable, 0 },
+            {VillageSettingEnums.EvasionDestinationId, 0 },
             {VillageSettingEnums.UseHeroResourceForBuilding, 0 },
             {VillageSettingEnums.ApplyRomanQueueLogicWhenBuilding, 0 },
             {VillageSettingEnums.UseSpecialUpgrade, 0 },
@@ -159,37 +172,14 @@ namespace MainCore.Infrasturecture.Persistence
 
         public void FillVillageSettings()
         {
-            var missingSettings = GetMissingVillageSettings();
-            if (missingSettings.Count == 0) return;
-
-            var missingSettingsDict = missingSettings
-                .Select(x => new
-                {
-                    Setting = x,
-                    Value = VillageDefaultSettings[x],
-                })
-                .ToDictionary(x => x.Setting, x => x.Value);
-
-            var ids = Villages
-                .Select(x => x.Id)
-                .AsEnumerable();
-
-            var settings = new List<VillageSetting>();
-
-            foreach (var id in ids)
-            {
-                foreach (var (setting, value) in missingSettingsDict)
-                {
-                    settings.Add(new VillageSetting
-                    {
-                        VillageId = id,
-                        Setting = setting,
-                        Value = value,
-                    });
-                }
-            }
-
-            AddRange(settings);
+            // Settings may have been introduced after some villages were created;
+            // checking distinct setting names globally leaves other villages missing rows.
+            var existing = VillagesSetting.Select(x => new { x.VillageId, x.Setting }).AsEnumerable()
+                .Select(x => (x.VillageId, x.Setting)).ToHashSet();
+            foreach (var id in Villages.Select(x => x.Id).ToArray())
+                foreach (var (setting, value) in VillageDefaultSettings)
+                    if (!existing.Contains((id, setting)))
+                        VillagesSetting.Add(new VillageSetting { VillageId = id, Setting = setting, Value = value });
             SaveChanges();
         }
 

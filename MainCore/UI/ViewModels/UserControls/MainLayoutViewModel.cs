@@ -368,9 +368,8 @@ namespace MainCore.UI.ViewModels.UserControls
         [ReactiveCommand(RunInBackground = true)]
         private static string LoadVersion()
         {
-            var versionAssembly = Assembly.GetExecutingAssembly().GetName().Version!;
-            var version = new Version(versionAssembly.Major, versionAssembly.Minor, versionAssembly.Build);
-            return $"{version}";
+            return Assembly.GetEntryAssembly()?.GetCustomAttribute<AssemblyFileVersionAttribute>()?.Version
+                ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "Unknown";
         }
 
         private async Task SetOrClearDefaultTemplatePath(Func<DefaultTemplatePaths, string> getPath, Action<string> setPath, Action clearPath, string displayName)
