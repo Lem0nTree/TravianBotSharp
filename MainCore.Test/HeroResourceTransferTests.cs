@@ -115,6 +115,115 @@ public class HeroResourceTransferTests(PlaywrightFixture fixture) : ParserTestBa
         await browser.DidNotReceive().WaitPageChanged(Arg.Any<string>());
     }
 
+    [Theory]
+    [InlineData("disabled")]
+    [InlineData("readonly")]
+    public async Task FullGranaryUnusedZeroFieldAllowsOneVerifiedTransferWithoutFillingIt(string attribute)
+    {
+        await using var context = await CreateContextAsync();
+        var page = await context.NewPageAsync();
+        var rows = Rows([1928, 2817, 8291, 8689]).Replace("name='crop' value='0'", $"name='crop' value='0' {attribute}");
+        const string completion = "window.selected=Array.from(document.querySelectorAll('.resourceRow input')).sort((a,b)=>['lumber','clay','iron','crop'].indexOf(a.name)-['lumber','clay','iron','crop'].indexOf(b.name)).map(n=>Number(n.value));document.querySelector('.resourceTransferDialog').remove();document.querySelector('#l1').textContent='856';document.querySelector('#l2').textContent='1732';";
+        var html = Page(rows, completion).Replace("id='l4'>40", "id='l4'>7,800");
+        var browser = await BrowserAsync(page, html);
+        await page.EvaluateAsync("() => { window.filled=[]; document.querySelectorAll('.resourceRow input').forEach(n=>n.addEventListener('input',()=>window.filled.push(n.name))); }");
+        using var logger = new Serilog.LoggerConfiguration().CreateLogger();
+        var request = Request() with { Resource = [766, 1552, 0, 0], Required = [856, 1732, 30, 7800, 0] };
+        var result = await new UseHeroResourceCommand(browser, logger).ExecuteAsync(request, TestContext.Current.CancellationToken);
+        result.IsSuccess.ShouldBeTrue();
+        (await page.EvaluateAsync<string[]>("() => window.filled")).ShouldBe(["lumber", "clay", "iron"]);
+        (await page.EvaluateAsync<long[]>("() => window.selected")).ShouldBe([766, 1552, 0, 0]);
+        (await page.EvaluateAsync<int>("() => window.transfers")).ShouldBe(1);
+    }
+
+    [Theory]
+    [InlineData("disabled", 5, "0")]
+    [InlineData("disabled", 5, "5")]
+    [InlineData("readonly", 5, "0")]
+    [InlineData("readonly", 5, "5")]
+    [InlineData("disabled", 0, "7")]
+    [InlineData("readonly", 0, "7")]
+    [InlineData("disabled", 0, "")]
+    [InlineData("readonly", 0, "?")]
+    public async Task NoneditableRequiredOrUnverifiedZeroFieldStopsBeforeConfirmation(string attribute, long needed, string value)
+    {
+        await using var context = await CreateContextAsync();
+        var page = await context.NewPageAsync();
+        var rows = Rows().Replace("name='crop' value='0'", $"name='crop' value='{value}' {attribute}");
+        var browser = await BrowserAsync(page, Page(rows));
+        var sink = new CaptureSink();
+        using var logger = new Serilog.LoggerConfiguration().WriteTo.Sink(sink).CreateLogger();
+        var request = Request() with { Resource = [10, 20, 0, needed] };
+        var result = await new UseHeroResourceCommand(browser, logger).ExecuteAsync(request, TestContext.Current.CancellationToken);
+        result.HasError<Stop>().ShouldBeTrue();
+        result.HasError<Retry>().ShouldBeFalse();
+        (await page.EvaluateAsync<int>("() => window.transfers || 0")).ShouldBe(0);
+        var failure = sink.Events.Single(e => e.MessageTemplate.Text.Contains("stage=input_unverified"));
+        failure.Properties["Resource"].ToString().ShouldBe("\"crop\"");
+        failure.Properties["Count"].ToString().ShouldBe("1");
+        failure.Properties["Enabled"].ToString().ShouldBe(attribute == "disabled" ? "False" : "True");
+        failure.Properties["ReadOnly"].ToString().ShouldBe(attribute == "readonly" ? "True" : "False");
+        failure.Properties["Needed"].ToString().ShouldBe(needed.ToString());
+    }
+
+    private sealed class CaptureSink : Serilog.Core.ILogEventSink
+    {
+        public List<Serilog.Events.LogEvent> Events { get; } = [];
+        public void Emit(Serilog.Events.LogEvent logEvent) => Events.Add(logEvent);
+    }
+
+    [Theory]
+    [InlineData(9, 91, true)]
+    [InlineData(9, 90, false)]
+    [InlineData(11, 100, false)]
+    public async Task BlurClampedSelectionIsAcceptedOnlyWhenLowerAndFullyFunded(long selectedWood, long villageWood, bool allowed)
+    {
+        await using var context = await CreateContextAsync();
+        var page = await context.NewPageAsync();
+        var rows = Rows().Replace("name='lumber' value='0'", $"name='lumber' value='0' onblur=\"this.value='{selectedWood}';document.querySelector('#l1').textContent='{villageWood}';\"")
+            .Replace("name='crop' value='0'", "name='crop' value='0' disabled");
+        const string completion = "window.selectedWood=Number(document.querySelector('[name=lumber]').value);document.querySelector('.resourceTransferDialog').remove();document.querySelector('#l1').textContent='100';document.querySelector('#l2').textContent='200';";
+        var browser = await BrowserAsync(page, Page(rows, completion));
+        using var logger = new Serilog.LoggerConfiguration().CreateLogger();
+        var result = await new UseHeroResourceCommand(browser, logger).ExecuteAsync(Request(), TestContext.Current.CancellationToken);
+        result.IsSuccess.ShouldBe(allowed);
+        (await page.EvaluateAsync<int>("() => window.transfers || 0")).ShouldBe(allowed ? 1 : 0);
+        if (allowed) (await page.EvaluateAsync<long>("() => window.selectedWood")).ShouldBe(selectedWood);
+        else result.HasError<Stop>().ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task ProductionThatClearsAllDeficitsClosesDialogWithoutConfirming()
+    {
+        await using var context = await CreateContextAsync();
+        var page = await context.NewPageAsync();
+        var rows = Rows().Replace("name='lumber' value='0'", "name='lumber' value='0' onblur=\"this.value='0';document.querySelector('#l1').textContent='100';\"")
+            .Replace("name='clay' value='0'", "name='clay' value='0' onblur=\"this.value='0';document.querySelector('#l2').textContent='200';document.querySelector('#confirm').disabled=true;\"");
+        var browser = await BrowserAsync(page, Page(rows));
+        using var logger = new Serilog.LoggerConfiguration().CreateLogger();
+        var result = await new UseHeroResourceCommand(browser, logger).ExecuteAsync(Request(), TestContext.Current.CancellationToken);
+        result.IsSuccess.ShouldBeTrue();
+        (await page.EvaluateAsync<int>("() => window.transfers || 0")).ShouldBe(0);
+        (await page.Locator(".resourceTransferDialog:visible").CountAsync()).ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task LastEditedFieldIsBlurredBeforeFinalSelectionIsLoggedAndConfirmed()
+    {
+        await using var context = await CreateContextAsync();
+        var page = await context.NewPageAsync();
+        var rows = Rows().Replace("name='crop' value='0'", "name='crop' value='0' onblur=\"this.value='9';document.querySelector('#l4').textContent='31';\"");
+        const string completion = "document.querySelector('.resourceTransferDialog').remove();document.querySelector('#l1').textContent='100';document.querySelector('#l2').textContent='200';document.querySelector('#l4').textContent='40';";
+        var browser = await BrowserAsync(page, Page(rows, completion).Replace("id='l4'>40", "id='l4'>30"));
+        var sink = new CaptureSink();
+        using var logger = new Serilog.LoggerConfiguration().WriteTo.Sink(sink).CreateLogger();
+        var request = Request() with { Resource = [10, 20, 0, 10] };
+        (await new UseHeroResourceCommand(browser, logger).ExecuteAsync(request, TestContext.Current.CancellationToken)).IsSuccess.ShouldBeTrue();
+        var confirmation = sink.Events.Single(e => e.MessageTemplate.Text.Contains("stage=confirmation_attempt"));
+        confirmation.Properties["Selected"].ToString().ShouldBe("[10, 20, 0, 9]");
+        (await page.EvaluateAsync<int>("() => window.transfers")).ShouldBe(1);
+    }
+
     [Fact]
     public async Task RealFastRedirectDoesNotRequireObservingTheIntermediateUrl()
     {

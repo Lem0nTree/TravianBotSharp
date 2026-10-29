@@ -25,7 +25,7 @@
 - Auto NPC
 - Auto train troop
 
-Hero resource top-ups verify each named transfer row and its resource item identity, independently of inventory order. A genuine inventory shortage closes the dialog without transferring and logs `inventory_insufficient` followed by the normal `production_wait` time. Unreadable amounts are reported separately. After one confirmation the bot checks the same village/building and live stocks before upgrading; an uncertain transfer pauses for inspection instead of repeating it. Logs distinguish `confirmation_attempt`, `stocks_verified`, and `upgrade_attempt`; attempting a transfer alone does not mean construction has started.
+Hero resource top-ups verify each named transfer row and its resource item identity, independently of inventory order. An unused resource may remain disabled or read-only when its verified transfer amount is zero, such as crop when the granary is full; a resource needed for the transfer must be editable. If production lowers the dialog's selected amount, the bot accepts the decrease only when current village stocks plus the selection still fund the building; it closes the dialog without transferring when production already covers everything. A genuine inventory shortage closes the dialog without transferring and logs `inventory_insufficient` followed by the normal `production_wait` time. Unreadable amounts are reported separately. After one confirmation the bot checks the same village/building and live stocks before upgrading; an uncertain transfer pauses for inspection instead of repeating it. Logs distinguish `confirmation_attempt`, `stocks_verified`, and `upgrade_attempt`; attempting a transfer alone does not mean construction has started.
 
 ## Telegram notifications
 
