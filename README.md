@@ -63,7 +63,11 @@ The current construction parser reads `.buildingList li`; two successive upgrade
 
 ## Evasion (experimental)
 
+For troubleshooting, check the account log for `Rally parser` diagnostics and `Evasion` stage entries. Parser diagnostics contain only table classes, movement markers and countdown summaries, not page HTML or player titles. Incomplete or conflicting incoming rows stop scheduling and cancellation; the first failure, changes and recovery are logged, with repeated identical failures rate-limited. Operation entries show the village, attack marker, destination, stage, target time, actual time and reason. A click returning does not prove that a merchant delivery or troop movement succeeded; inspect the game when an outcome is reported as uncertain.
+
 In each village's settings choose another owned village, set capital status, enable the desired evasion controls and save. Resource evasion attempts to send at 30 seconds before impact, using available merchant capacity in wood, clay, iron, crop order. Troop evasion is available only for a village explicitly marked non-capital; it attempts a reinforcement at 20 seconds before impact and cancels the uniquely identified movement after the relevant attack waves. The bot must be running and the account online. It checks for attacks independently of Auto Refresh, but browser or network delays, a late observation, multiple simultaneous actions, sleep, or downtime can cause a missed deadline.
+
+Evasion scans share one sidebar refresh per account, at most once every 10 seconds after the previous refresh attempt finishes. Idle villages reuse that sidebar without switching villages or opening rally points; an attacked village or an unresolved troop recovery is inspected separately. A failed refresh is not treated as fresh and is retried after the interval. Other enabled bot tasks may still navigate or refresh the browser for their own work.
 
 The first send click is allowed within one second after its target; a recognized confirmation click is allowed up to three seconds after the target and never at or after impact. Actual click drift is logged. Troop matching requires a verified source map tile from the home-troops table or an existing outgoing movement and uses coordinates to calculate the destination's map tile; without that evidence troop evasion skips.
 

@@ -5,52 +5,128 @@ namespace MainCore.Test.Evasion;
 
 public class IncomingAttackAdapterTests(PlaywrightFixture fixture) : ParserTestBase(fixture)
 {
+    // Sanitized shape from the observed rally DOM. IDs and all text are fictional.
+    private const string Raid = """
+        <table class='troop_details inRaid'><tbody><tr><td>
+          <a class='markAttack'><img id='markSymbol_123' class='markAttack markAttack0' alt='mark attack'></a>
+          <div class='infos'><div class='in'><span class='timer' counting='down' value='268' data-value='268'>0:04:28</span></div></div>
+        </td></tr></tbody></table>
+        """;
+    private const string Friendly = """
+        <table class='troop_details inSupplyOasis'><tr><td><div class='infos'><div class='in'><span class='timer' counting='down'>0:06:36</span></div></div></td></tr></table>
+        <table class='troop_details outSupply'><tr><td><div class='infos'><div class='in'><span class='timer' counting='down'>0:06:36</span></div></div></td></tr></table>
+        <table class='troop_details'><tr><td>own troops</td></tr></table>
+        """;
+
     [Fact]
-    public async Task ReadsObservedAttackIdentityAndTimerExcludingReturns()
+    public async Task ObservedRaidShapeNeedsNoAnchorTitleAndIgnoresFriendlyMovements()
     {
         await using var context = await CreateContextAsync();
         var page = await context.NewPageAsync();
-        // Synthetic fixture based on accessibility details observed in the paused browser.
-        await page.SetContentAsync("""
-            <h2>Incoming troops (4)</h2>
-            <table class='troop_details inAttack'>
-            <tr><td><a title='mark attack'><img id='markSymbol_1705985'></a>Principle attacks ChatGPT</td></tr>
-            <tr><th>Arrival</th><td>in 0:00:28 hrs. at 11:36:57</td></tr></table>
-            <table class='troop_details inReturn'><tr><td>Return from Other</td></tr></table>
-            <table class='troop_details outRaid'><tr><td>Me raids Other</td></tr></table>
-            """);
-        var now = DateTimeOffset.Parse("2026-01-01T11:36:29Z");
-        var attacks = await IncomingAttackAdapter.ReadAsync(page, now);
-        attacks.ShouldNotBeNull();
-        attacks.Count.ShouldBe(1);
-        attacks[0].Id.ShouldBe("1705985");
-        attacks[0].ImpactAt.ShouldBe(now.AddSeconds(28));
+        await page.SetContentAsync(Raid + Friendly);
+        var start = DateTimeOffset.UtcNow;
+        var report = await IncomingAttackAdapter.ReadAsync(page);
+        var end = DateTimeOffset.UtcNow;
+        report.Complete.ShouldBeTrue();
+        report.Rows.ShouldBe(4);
+        report.HostileRows.ShouldBe(1);
+        report.Attacks.Single().Id.ShouldBe("123");
+        report.SampledAt.ShouldBeGreaterThanOrEqualTo(start.AddSeconds(-1));
+        report.SampledAt.ShouldBeLessThanOrEqualTo(end.AddSeconds(1));
+        report.Attacks.Single().ImpactAt.ShouldBe(report.SampledAt.AddSeconds(268));
     }
 
     [Fact]
-    public async Task ParsesSeparateHostileWavesAndRejectsAnUnmarkedHostileTable()
+    public async Task MultipleWavesNonEnglishBidiAndNestedTableAreReadOnce()
     {
         await using var context = await CreateContextAsync();
         var page = await context.NewPageAsync();
-        const string rows = """
-            <h2>Incoming troops (4)</h2>
-            <table class='troop_details inAttack'><tr><td><a title='mark attack'><img id='markSymbol_101'></a>A attacks B</td><td>in 0:00:28 hrs.</td></tr></table>
-            <table class='troop_details inRaid'><tr><td><a title='mark attack'><img id='markSymbol_102'></a>C raids B</td><td>in 0:00:35 hrs.</td></tr></table>
-            """;
-        await page.SetContentAsync(rows);
-        var attacks = await IncomingAttackAdapter.ReadAsync(page, DateTimeOffset.UtcNow);
-        attacks.ShouldNotBeNull();
-        attacks.Select(x => x.Id).ShouldBe(["101", "102"]);
-        await page.SetContentAsync(rows + "<table class='troop_details inAttack'><tr><td>Unknown attacks B</td><td>in 0:00:40 hrs.</td></tr></table>");
-        (await IncomingAttackAdapter.ReadAsync(page, DateTimeOffset.UtcNow)).ShouldBeNull();
+        var nested = Raid.Replace("<div class='infos'>", "<table><tr><td>日本語</td></tr></table><div class='infos'>")
+            .Replace("0:04:28", "&#8237;0:04:28&#8236;");
+        await page.SetContentAsync(nested + Raid.Replace("markSymbol_123", "markSymbol_124").Replace("0:04:28", "0:04:35"));
+        var report = await IncomingAttackAdapter.ReadAsync(page);
+        report.Complete.ShouldBeTrue();
+        report.Attacks.Select(x => x.Id).ShouldBe(["123", "124"]);
+        report.Attacks[1].ImpactAt.ShouldBe(report.SampledAt.AddSeconds(275));
+    }
+
+    [Theory]
+    [InlineData("markSymbol_bad", "0:04:28", "invalid-marker")]
+    [InlineData("markSymbol_123", "0:00:00", "invalid-countdown")]
+    [InlineData("markSymbol_123", "unreadable", "invalid-countdown")]
+    public async Task AnyMalformedHostileRowRejectsTheWholeSnapshot(string marker, string timer, string reason)
+    {
+        await using var context = await CreateContextAsync();
+        var page = await context.NewPageAsync();
+        await page.SetContentAsync(Raid + Raid.Replace("markSymbol_123", marker).Replace("0:04:28", timer));
+        var report = await IncomingAttackAdapter.ReadAsync(page);
+        report.Complete.ShouldBeFalse();
+        report.Attacks.ShouldBeEmpty();
+        report.Issues.ShouldContain(i => i.Reason == reason);
     }
 
     [Fact]
-    public async Task RefusesIncompleteMarkedAttack()
+    public async Task RejectsDuplicateMarkersMissingTimersUnknownIncomingAndConflictingClasses()
     {
         await using var context = await CreateContextAsync();
         var page = await context.NewPageAsync();
-        await page.SetContentAsync("<table><tr><td>Incoming troops <a title='mark attack'><img id='markSymbol_123'></a> attacks</td></tr></table>");
-        (await IncomingAttackAdapter.ReadAsync(page, DateTimeOffset.UtcNow)).ShouldBeNull();
+        foreach (var html in new[] {
+            Raid + Raid,
+            Raid.Replace("counting='down'", "counting='up'"),
+            "<table class='troop_details inUnknown'><tr><td>?</td></tr></table>",
+            Raid.Replace("troop_details inRaid", "troop_details"),
+            Raid.Replace("inRaid", "inRaid inAttack"),
+            Raid.Replace("inRaid", "inReturn") })
+        {
+            await page.SetContentAsync(html);
+            (await IncomingAttackAdapter.ReadAsync(page)).Complete.ShouldBeFalse();
+        }
+    }
+
+    [Fact]
+    public void DiagnosticGateLogsFirstChangedAndRecoveryWithoutRepeatingEveryScan()
+    {
+        var gate = new RallyDiagnosticGate();
+        var now = DateTimeOffset.UtcNow;
+        var fail = new RallyReport(false, [], 1, 1, [new("invalid-countdown", "troop_details inRaid", ["markSymbol_123"], ["<invalid>"], 1, 1)], now);
+        gate.Observe("1:2:scan", fail, now).ShouldBe("first");
+        gate.Observe("1:2:scan", fail, now.AddSeconds(10)).ShouldBeNull();
+        gate.Observe("1:2:scan", fail with { Issues = [fail.Issues[0] with { Reason = "invalid-marker" }] }, now.AddSeconds(20)).ShouldBe("changed");
+        gate.Observe("1:2:scan", fail with { Complete = true, Issues = [] }, now.AddSeconds(30)).ShouldBe("recovered");
+    }
+
+    [Fact]
+    public void DiagnosticLogPreservesAccountRoutingContext()
+    {
+        var sink = new CaptureSink();
+        using var logger = new Serilog.LoggerConfiguration().Enrich.WithProperty("Account", "owner_server").WriteTo.Sink(sink).CreateLogger();
+        var report = new RallyReport(false, [], 1, 1, [new("invalid-marker", "troop_details inRaid", ["<invalid>"], [], 1, 0)], DateTimeOffset.UtcNow);
+        RallyDiagnostics.Log(logger, 991234, 999, "scan", report);
+        sink.Event.ShouldNotBeNull();
+        sink.Event.Properties["Account"].ToString().ShouldBe("\"owner_server\"");
+        sink.Event.Properties["AccountId"].ToString().ShouldBe("991234");
+    }
+
+    [Fact]
+    public void ResourcePreparationLogContainsCorrelationAndObservedCapacity()
+    {
+        var sink = new CaptureSink();
+        using var logger = new Serilog.LoggerConfiguration().Enrich.WithProperty("Account", "owner_server").WriteTo.Sink(sink).CreateLogger();
+        var trace = new EvasionTrace(logger, 7, 8, "123", "merchant", 9, DateTimeOffset.UtcNow.AddMinutes(1), DateTimeOffset.UtcNow.AddSeconds(30));
+        trace.Resources(new MarketplaceAdapter.Prepared([10, 5, 0, 0], 15, [10, 20, 30, 40], 3, 5));
+        sink.Event.ShouldNotBeNull();
+        sink.Event.Properties["Account"].ToString().ShouldBe("\"owner_server\"");
+        sink.Event.Properties["AccountId"].ToString().ShouldBe("7");
+        sink.Event.Properties["AttackId"].ToString().ShouldBe("\"123\"");
+        sink.Event.Properties["Merchants"].ToString().ShouldBe("3");
+        sink.Event.Properties["Capacity"].ToString().ShouldBe("15");
+        sink.Event.Properties.ShouldContainKey("Stocks");
+        sink.Event.Properties.ShouldContainKey("Amounts");
+    }
+
+    private sealed class CaptureSink : Serilog.Core.ILogEventSink
+    {
+        public Serilog.Events.LogEvent? Event { get; private set; }
+        public void Emit(Serilog.Events.LogEvent logEvent) => Event = logEvent;
     }
 }

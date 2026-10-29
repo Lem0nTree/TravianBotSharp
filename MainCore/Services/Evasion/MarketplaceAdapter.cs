@@ -6,7 +6,7 @@ namespace MainCore.Services.Evasion;
 // Contract based on the observed English marketplace screen; unrecognized layouts fail closed.
 public static partial class MarketplaceAdapter
 {
-    public sealed record Prepared(long[] Amounts, long Capacity);
+    public sealed record Prepared(long[] Amounts, long Capacity, long[] Stocks, long Merchants, long CapacityPerMerchant);
 
     public static async Task<bool> MatchesAsync(IPage page, int x, int y, IReadOnlyList<long> amounts)
     {
@@ -64,7 +64,7 @@ public static partial class MarketplaceAdapter
         await once.CheckAsync();
         for (var i = 0; i < 4; i++) await resourceInputs[i].FillAsync(amounts[i].ToString(CultureInfo.InvariantCulture));
         if (!await send.IsEnabledAsync() || await send.EvaluateAsync<bool>("node => node.classList.contains('disabled')")) return null;
-        return new(amounts, total);
+        return new(amounts, total, stocks, available, each);
     }
 
     private static bool TryNumber(string text, out long number)
