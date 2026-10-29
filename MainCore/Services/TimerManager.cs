@@ -77,10 +77,13 @@ namespace MainCore.Services
 
         public async Task Execute(AccountId accountId)
         {
-            try { await ExecuteCore(accountId); }
+            var phase = "startup";
+            try { await ExecuteCore(accountId, value => phase = value); }
             catch (Exception ex)
             {
-                Serilog.Log.Warning("Account task execution stopped safely account={AccountId} errorType={ErrorType}; state may not have been saved. Inspect the game before restarting or resuming", accountId.Value, ex.GetType().Name);
+                // Detailed exceptions stay in local logs; remote alerts contain only
+                // the generic recovery instruction below.
+                Serilog.Log.Warning(ex, "Account task execution stopped safely account={AccountId} phase={Phase} errorType={ErrorType}; state may not have been saved. Inspect the game before restarting or resuming", accountId.Value, phase, ex.GetType().Name);
                 _taskManager.SetStatus(accountId, StatusEnums.Paused);
                 if (_taskManager.GetTaskQueue(accountId).CancellationTokenSource?.IsCancellationRequested != true)
                     NotifyAccountFailure(accountId, stateMayBeUnsaved: true);
@@ -90,7 +93,7 @@ namespace MainCore.Services
                 var queue = _taskManager.GetTaskQueue(accountId);
                 if (queue.IsExecuting)
                 {
-                    foreach (var running in queue.Tasks.Where(x => x.Stage == StageEnums.Executing)) running.Stage = StageEnums.Waiting;
+                    foreach (var running in _taskManager.GetTaskList(accountId).Where(x => x.Stage == StageEnums.Executing)) running.Stage = StageEnums.Waiting;
                     queue.IsExecuting = false;
                     queue.CancellationTokenSource?.Dispose();
                     queue.CancellationTokenSource = null;
@@ -99,15 +102,21 @@ namespace MainCore.Services
             }
         }
 
-        private async Task ExecuteCore(AccountId accountId)
+        private async Task ExecuteCore(AccountId accountId, Action<string> phase)
         {
             var taskQueue = _taskManager.GetTaskQueue(accountId);
 
             var status = taskQueue.Status;
             if (status != StatusEnums.Online) return;
-            _taskFailures.Apply(accountId, taskQueue.Tasks);
-            var task = EvasionScheduling.Select(taskQueue.Tasks.Where(x => !x.IsQuarantined), DateTime.Now, TimeSpan.FromSeconds(20));
+            // Initialization and notifications may enqueue more tasks concurrently.
+            // One locked snapshot owns this entire selection pass.
+            var tasks = _taskManager.GetTaskList(accountId);
+            phase("persistent-task-state");
+            _taskFailures.Apply(accountId, tasks);
+            phase("task-selection");
+            var task = EvasionScheduling.Select(tasks.Where(x => !x.IsQuarantined), DateTime.Now, TimeSpan.FromSeconds(20));
             if (task is null) return;
+            phase("account-settings");
             bool evasionEnabled;
             using (var settingsDb = _contextFactory.CreateDbContext())
                 evasionEnabled = settingsDb.VillagesSetting.Any(s => s.Value == 1 &&
@@ -123,9 +132,11 @@ namespace MainCore.Services
 
             var cacheExecuteTime = task.ExecuteAt;
 
+            phase("task-scope");
             using var scope = _serviceScopeFactory.CreateScope(accountId);
 
             ///===========================================================///
+            phase("browser-service");
             var browser = scope.ServiceProvider.GetRequiredService<IChromeBrowser>();
             var logger = browser.Logger;
 
@@ -162,6 +173,7 @@ namespace MainCore.Services
             resilienceContext.Properties.Set(contextDataKey, contextData);
 
             Outcome<Result> poliResult;
+            phase("task-handler");
             if (task is IEvasionTask || evasionEnabled || TaskFailureController.IsLocal(task))
             {
                 // A timed mutation can have an ambiguous outcome; never apply the
@@ -190,6 +202,7 @@ namespace MainCore.Services
             taskQueue.CancellationTokenSource = null;
 
             var local = TaskFailureController.IsLocal(task);
+            phase("task-outcome");
             var uncertain = poliResult.Result?.HasError<UncertainTaskOutcome>() == true;
             var fatal = poliResult.Exception?.GetType().Name == "TargetClosedException" || poliResult.Result?.HasError<BrowserRecoveryFailed>() == true
                 || !browser.IsInitialized || browser.CurrentPage.IsClosed;
@@ -318,7 +331,7 @@ namespace MainCore.Services
                 }
             }
 
-            if (task is IEvasionTask || taskQueue.Tasks.Any(x => x is IEvasionTask && x.ExecuteAt <= DateTime.Now.AddSeconds(20))) return;
+            if (task is IEvasionTask || _taskManager.GetTaskList(accountId).Any(x => x is IEvasionTask && x.ExecuteAt <= DateTime.Now.AddSeconds(20))) return;
             using var context = _contextFactory.CreateDbContext();
             var delay = context.ByName(accountId, AccountSettingEnums.TaskDelayMin, AccountSettingEnums.TaskDelayMax);
             await Task.Delay(delay);

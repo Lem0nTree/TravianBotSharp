@@ -124,9 +124,9 @@ namespace MainCore.UI.ViewModels.Tabs
         [ReactiveCommand(RunInBackground = true)]
         private List<TaskItem> LoadTask(AccountId accountId)
         {
-            _taskFailures.Apply(accountId, _taskManager.GetTaskList(accountId));
-            var tasks = _taskManager
-               .GetTaskList(accountId)
+            var snapshot = _taskManager.GetTaskList(accountId);
+            _taskFailures.Apply(accountId, snapshot);
+            var tasks = snapshot
                .OrderBy(x => x.ExecuteAt)
                .Select(x => new TaskItem(x))
                .ToList();

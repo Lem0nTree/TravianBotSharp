@@ -5,10 +5,11 @@ namespace MainCore.Services.Scheduling
     internal sealed class AccountSchedulerActor(AccountId accountId, RxQueue rxQueue)
     {
         private readonly TaskQueue _queue = new();
+        private readonly object _gate = new();
 
         public TaskQueue GetQueue() => _queue;
 
-        public List<BaseTask> GetTaskList() => _queue.Tasks;
+        public List<BaseTask> GetTaskList() { lock (_gate) return [.. _queue.Tasks]; }
 
         public CancellationTokenSource? GetCancellationTokenSource() => _queue.CancellationTokenSource;
 
@@ -18,11 +19,13 @@ namespace MainCore.Services.Scheduling
 
         public void Add<T>(T task, bool first) where T : BaseTask
         {
-            AddTask(task, first);
+            lock (_gate) AddTask(task, first);
         }
 
         public void AddOrUpdate<T>(T task, bool first) where T : BaseTask
         {
+            lock (_gate)
+            {
             var oldTask = _queue.Tasks
                 .OfType<T>()
                 .FirstOrDefault(x => x.Key == task.Key);
@@ -49,37 +52,47 @@ namespace MainCore.Services.Scheduling
             {
                 oldTask.ExecuteAt = task.ExecuteAt;
             }
+            }
         }
 
         public void Remove(BaseTask task)
         {
-            _queue.Tasks.Remove(task);
+            lock (_gate) _queue.Tasks.Remove(task);
         }
 
         public void Remove<T>() where T : AccountTask
         {
+            lock (_gate)
+            {
             var task = _queue.Tasks.OfType<T>().FirstOrDefault(x => x.AccountId == accountId);
             if (task is null) return;
 
             _queue.Tasks.Remove(task);
+            }
         }
 
         public void Remove<T>(VillageId villageId) where T : VillageTask
         {
+            lock (_gate)
+            {
             var task = _queue.Tasks.OfType<T>().FirstOrDefault(x => x.AccountId == accountId && x.VillageId == villageId);
             if (task is null) return;
 
             _queue.Tasks.Remove(task);
+            }
         }
 
         public void Clear()
         {
+            lock (_gate)
+            {
             if (_queue.Tasks.Count == 0)
             {
                 return;
             }
 
             _queue.Tasks.Clear();
+            }
             rxQueue.Enqueue(new TasksModified(accountId));
         }
 
