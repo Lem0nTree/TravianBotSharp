@@ -63,12 +63,14 @@ namespace MainCore.Tasks
                     {
                         var time = await UpgradeParser.GetTimeWhenEnoughResource(browser.CurrentPage, plan.Type);
                         task.ExecuteAt = DateTime.Now.Add(time);
+                        logger.Information("Build stage=production_wait village={VillageId} slot={Slot} building={Building} nextAttempt={NextAttempt}; village or hero stock is insufficient", task.VillageId.Value, plan.Location, plan.Type, task.ExecuteAt);
                         return Skip.Error.WithErrors(result.Errors);
                     }
 
                     return result;
                 }
 
+                logger.Information("Build stage=upgrade_attempt village={VillageId} slot={Slot} building={Building} targetLevel={Level}", task.VillageId.Value, plan.Location, plan.Type, plan.Level);
                 result = await handleUpgradeCommand.HandleAsync(new(task.VillageId, plan), cancellationToken);
                 if (result.IsFailed) return result;
 

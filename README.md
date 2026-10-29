@@ -25,6 +25,8 @@
 - Auto NPC
 - Auto train troop
 
+Hero resource top-ups verify each named transfer row and its resource item identity, independently of inventory order. A genuine inventory shortage closes the dialog without transferring and logs `inventory_insufficient` followed by the normal `production_wait` time. Unreadable amounts are reported separately. After one confirmation the bot checks the same village/building and live stocks before upgrading; an uncertain transfer pauses for inspection instead of repeating it. Logs distinguish `confirmation_attempt`, `stocks_verified`, and `upgrade_attempt`; attempting a transfer alone does not mean construction has started.
+
 ## Telegram notifications
 
 Open **Account settings → Configure Telegram notifications**. Settings are separate for each account and local database location.

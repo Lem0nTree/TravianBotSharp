@@ -33,15 +33,19 @@ namespace MainCore.Commands.Features.UpgradeBuilding
             }
 
             if (result.HasError<StorageLimit>()) return result;
+            if (!result.HasError<MissingResource>()) return result;
             if (!CanUseHeroResource(villageId)) return result;
 
-            logger.Information("Don't have enough resource. Use resource in hero invetory to upgrade building");
+            logger.Information("Hero resources stage=check village={VillageId} slot={Slot}; checking inventory for the village shortage", villageId.Value, plan.Location);
             var missingResource = GetMissingResource(villageId, requiredResource);
 
-            result = await useHeroResourceCommand.HandleAsync(new(plan.Type, missingResource), cancellationToken);
+            result = await useHeroResourceCommand.HandleAsync(new(villageId, plan, missingResource, requiredResource), cancellationToken);
             if (result.IsFailed) return result;
-
-            return Result.Ok();
+            if (!await UseHeroResourceCommand.IsBuildingContextAsync(browser.CurrentPage, villageId, plan))
+                return Stop.Error.WithError("Village or building context changed after using hero resources.");
+            await updateStorageCommand.HandleAsync(new(accountId, villageId), cancellationToken);
+            result = IsEnoughResource(villageId, requiredResource);
+            return result.IsSuccess ? result : Stop.Error.WithError("The building is not funded after hero transfer. Inspect stocks before resuming.");
         }
 
         private async Task<long[]> GetRequiredResource(BuildingEnums building)
@@ -73,7 +77,7 @@ namespace MainCore.Commands.Features.UpgradeBuilding
             var storage = context.Storages
                 .FirstOrDefault(x => x.VillageId == villageId.Value);
 
-            if (storage is null) return [0, 0, 0, 0];
+            if (storage is null) throw new InvalidOperationException("Village resource data is unavailable.");
 
             var resource = new long[4];
             if (storage.Wood < requiredResource[0]) resource[0] = requiredResource[0] - storage.Wood;
@@ -110,7 +114,7 @@ namespace MainCore.Commands.Features.UpgradeBuilding
             var storage = context.Storages
                 .FirstOrDefault(x => x.VillageId == villageId.Value);
 
-            if (storage is null) return Result.Ok();
+            if (storage is null) return Stop.Error.WithError("Village resource data is unavailable.");
 
             var errors = new List<Error>();
             if (storage.Wood < resource[0])

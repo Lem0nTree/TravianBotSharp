@@ -12,8 +12,8 @@
   <PropertyGroup>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <AssemblyName>TravianBotSharp</AssemblyName>
-    <Version>2.13.0.7</Version>
-    <FileVersion>2.13.0.7</FileVersion>
+    <Version>2.13.0.8</Version>
+    <FileVersion>2.13.0.8</FileVersion>
     <SignAssembly>False</SignAssembly>
     <ApplicationIcon>favicon.ico</ApplicationIcon>
   </PropertyGroup>
