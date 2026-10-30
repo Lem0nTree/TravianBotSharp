@@ -8,23 +8,33 @@ namespace MainCore.Commands.Features.UpgradeBuilding
         IDbContextFactory<AppDbContext> contextFactory,
         ILogger logger)
     {
-        public sealed record Command(VillageId VillageId, NormalBuildPlan Plan) : IVillageCommand;
+        public sealed record Command(VillageId VillageId, NormalBuildPlan Plan) : IVillageCommand
+        {
+            public ConstructionStep? SubmittedStep { get; internal set; }
+        }
 
-        private async ValueTask<Result> HandleAsync(Command command, CancellationToken token)
+        private async ValueTask<Result> HandleAsync(Command command, CancellationToken token) => await ExecuteAsync(command, token);
+
+        public async Task<Result> ExecuteAsync(Command command, CancellationToken token)
         {
             var (villageId, plan) = command;
 
             LogBuildingInfo(villageId, plan);
+            using (var db = contextFactory.CreateDbContext())
+                command.SubmittedStep = await ConstructionStepParser.CaptureAsync(browser.CurrentPage, db, browser.AccountId, villageId, plan);
+            if (command.SubmittedStep is not { } step)
+                return Retry.Error.WithError("The next construction step could not be verified; no upgrade click was attempted.");
+            logger.Information("Construction stage=step_verified village={VillageId} slot={Slot} building={Building} submittedLevel={SubmittedLevel} queueGoal={QueueGoal}", villageId.Value, step.Slot, step.Type, step.Level, plan.Level);
 
             Result result;
             if (CanUseSpecialUpgrade(villageId) && !UnskippableBuildings.Contains(plan.Type))
             {
-                result = await SpecialUpgrade(plan.Type, token);
+                result = await SpecialUpgrade(plan.Type, step, token);
                 if (result.IsFailed) return result;
             }
             else
             {
-                result = await Upgrade(plan.Type, token);
+                result = await Upgrade(plan.Type, step, token);
                 if (result.IsFailed) return result;
             }
 
@@ -70,10 +80,10 @@ namespace MainCore.Commands.Features.UpgradeBuilding
             return useSpecialUpgrade;
         }
 
-        private async Task<Result> SpecialUpgrade(BuildingEnums building, CancellationToken token)
+        private async Task<Result> SpecialUpgrade(BuildingEnums building, ConstructionStep step, CancellationToken token)
         {
             var button = await UpgradeParser.GetSpecialButton(browser.CurrentPage, building);
-            return await CommitOnceAsync(button, HandleAds, token);
+            return await CommitOnceAsync(button, HandleAds, token, step);
         }
 
         private async Task<Result> HandleAds()
@@ -101,13 +111,13 @@ namespace MainCore.Commands.Features.UpgradeBuilding
             return Result.Ok();
         }
 
-        private async Task<Result> Upgrade(BuildingEnums building, CancellationToken token)
+        private async Task<Result> Upgrade(BuildingEnums building, ConstructionStep step, CancellationToken token)
         {
             var button = await UpgradeParser.GetNormalButton(browser.CurrentPage, building);
-            return await CommitOnceAsync(button, () => browser.WaitPageChanged("dorf"), token);
+            return await CommitOnceAsync(button, () => browser.WaitPageChanged("dorf"), token, step);
         }
 
-        public async Task<Result> CommitOnceAsync(ILocator button, Func<Task<Result>> observeCompletion, CancellationToken token = default)
+        public async Task<Result> CommitOnceAsync(ILocator button, Func<Task<Result>> observeCompletion, CancellationToken token = default, ConstructionStep? step = null)
         {
             if (await button.CountAsync() != 1 || !await button.IsVisibleAsync() || !await button.IsEnabledAsync() || await button.EvaluateAsync<bool>("n => n.classList.contains('disabled')"))
                 return Retry.Error.WithError("The construction button is unavailable; no upgrade click was attempted.");
@@ -119,7 +129,7 @@ namespace MainCore.Commands.Features.UpgradeBuilding
                 if (result.IsSuccess) return result;
             }
             catch (Exception ex) { logger.Warning("Construction stage=outcome_uncertain errorType={ErrorType}", ex.GetType().Name); }
-            return Result.Fail(new UncertainTaskOutcome("Construction may have started, but its outcome is uncertain. Inspect the game before retrying this village's build queue."));
+            return Result.Fail(new UncertainTaskOutcome("Construction may have started, but its outcome is uncertain. Inspect the game before retrying this village's build queue.", step));
         }
     }
 }

@@ -33,6 +33,8 @@ Construction, Auto Build and NPC failures defer only that village's affected tas
 
 Task initialization and scheduling use a shared lock and stable queue snapshots so newly queued work cannot invalidate a running selection pass. Unexpected account-level failures include the execution phase and full exception in local logs; Telegram receives only the general recovery notice.
 
+A queued building goal can require several upgrades: a goal of level 5 may first submit level 2, then level 3. The bot verifies the next step shown by the build button against the completed level and exact-slot queue, and confirms that submitted step on a fresh resource-field or village-center view. A read-only confirmation can recover an uncertain redirect without another upgrade click. The original queue goal remains unchanged; unresolved holds retain the submitted step in their warning and still require inspection.
+
 An uncertain hero transfer, construction click or paid NPC exchange is held for inspection without automatic retries; saved holds survive app restarts. If saving the hold fails, the account pauses and retains an in-memory hold: inspect the game before restarting or resuming, because that unsaved hold cannot survive an app restart. Pause the account, check what happened in the game, then use **Retry failed tasks** in the task/log tab to clear the holds. Existing jobs and settings are preserved. User cancellation and an unusable browser or failed recovery still pause the account. Disabled or no-longer-eligible queued NPC tasks are removed before navigation, and abandoned NPC dialogs are closed with their cancel control or a read-only village overview request—never with a paid exchange.
 
 Open **Account settings → Configure Telegram notifications**. Settings are separate for each account and local database location.
@@ -64,6 +66,8 @@ Protocol reference: [Telegram Bot API](https://core.telegram.org/bots/api#sendme
 ## Auto Build (experimental)
 
 In a village's settings, enable **Automatically upgrade the lowest eligible building** and save. The bot refreshes fields and the village center approximately once per minute while the account is online. It selects one supported, existing building or resource field with the lowest level, breaking ties by slot, and places one upgrade in the regular build queue only when the observed construction queue and pending bot queue are empty. Normal upgrade settings still apply. The account must remain online; the timing is not guaranteed.
+
+Existing normal jobs take priority over Auto Build. While those jobs remain, Auto Build skips its own village refreshes and ensures their build dispatcher exists, preserving any waiting time or inspection hold. Bounded status logs distinguish a waiting normal queue, a held dispatcher, active in-game construction and no eligible upgrade. A queued plan with no known completion wait that cannot progress is deferred through the normal task-failure policy rather than silently losing its dispatcher.
 
 Set the three-state **Capital status** separately for each village: checked means capital, unchecked means non-capital, and the dash means unknown. Unknown status prevents capital-only upgrades and limits resource fields to level 10. This setting is not imported from another village's settings file. Incorrect capital status can make the choice invalid. Turn off Auto Build and save to stop adding new jobs; an already queued or started upgrade remains in place.
 

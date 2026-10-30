@@ -11,7 +11,8 @@ namespace MainCore.Behaviors
         UpdateVillageListCommand.Handler updateVillageListCommand,
         UpdateDailyQuestCommand.Handler updateDailyQuestCommand,
         UpdateHeroLevelUpCommand.Handler updateHeroLevelUpCommand,
-        UpdateAdventureCommand.Handler updateAdventureCommand)
+        UpdateAdventureCommand.Handler updateAdventureCommand,
+        MainCore.Services.BuildingAutomation.AutoBuildQueuePriority autoBuildPriority)
             : Behavior<TRequest, TResponse>
                 where TRequest : AccountTask
                 where TResponse : Result
@@ -23,6 +24,7 @@ namespace MainCore.Behaviors
             {
                 return (TResponse)Cancel.Error;
             }
+            if (request is AutoBuildTask.Task auto && autoBuildPriority.TryHandle(auto, browser.Logger)) return (TResponse)Result.Ok();
             var accountId = request.AccountId;
             var cacheExecuteAt = request.ExecuteAt;
             var isIngamePage = await LoginParser.IsIngamePage(browser.CurrentPage);

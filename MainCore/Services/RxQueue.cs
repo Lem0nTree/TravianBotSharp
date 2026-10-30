@@ -87,10 +87,7 @@ namespace MainCore.Services
             foreach (var village in hasBuildJobVillages)
             {
                 var upgradeBuildingTask = new UpgradeBuildingTask.Task(accountId, village);
-                if (!taskManager.IsExist<UpgradeBuildingTask.Task>(accountId, village))
-                {
-                    taskManager.Add(upgradeBuildingTask);
-                }
+                taskManager.EnsureTask(upgradeBuildingTask);
             }
             EvasionStore.EnsureSchema(context);
             var recover = context.EvasionDispatches.AsNoTracking().Where(x => x.AccountId == accountId.Value && x.Kind == "troop" && x.State == "Sent" && x.MovementId != null).ToArray();

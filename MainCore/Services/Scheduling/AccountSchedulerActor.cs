@@ -22,6 +22,17 @@ namespace MainCore.Services.Scheduling
             lock (_gate) AddTask(task, first);
         }
 
+        public T Ensure<T>(T task) where T : BaseTask
+        {
+            lock (_gate)
+            {
+                var existing = _queue.Tasks.OfType<T>().FirstOrDefault(x => x.Key == task.Key);
+                if (existing is not null) return existing;
+                AddTask(task, first: false);
+                return task;
+            }
+        }
+
         public void AddOrUpdate<T>(T task, bool first) where T : BaseTask
         {
             lock (_gate)

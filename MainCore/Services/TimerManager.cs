@@ -204,13 +204,14 @@ namespace MainCore.Services
             var local = TaskFailureController.IsLocal(task);
             phase("task-outcome");
             var uncertain = poliResult.Result?.HasError<UncertainTaskOutcome>() == true;
+            var construction = poliResult.Result?.Errors.OfType<UncertainTaskOutcome>().Select(x => x.Construction).FirstOrDefault(x => x is not null);
             var fatal = poliResult.Exception?.GetType().Name == "TargetClosedException" || poliResult.Result?.HasError<BrowserRecoveryFailed>() == true
                 || !browser.IsInitialized || browser.CurrentPage.IsClosed;
             var explicitCancel = userCancelled || poliResult.Result?.HasError<Cancel>() == true;
             // Persist an uncertain action even if the user also paused or the browser closed.
             if (local && uncertain)
             {
-                _taskFailures.HoldUncertainInMemory(accountId, task);
+                _taskFailures.HoldUncertainInMemory(accountId, task, construction);
                 ReportLocalFailure(uncertain: true);
                 if (!await TaskDialogRecovery.CloseLocalAsync(browser)) fatal = true;
                 if (explicitCancel || fatal) _taskManager.SetStatus(accountId, StatusEnums.Paused);
@@ -246,7 +247,7 @@ namespace MainCore.Services
 
             void ReportLocalFailure(bool uncertain)
             {
-                var decision = _taskFailures.Fail(accountId, task, uncertain);
+                var decision = _taskFailures.Fail(accountId, task, uncertain, construction);
                 var detail = poliResult.Exception?.Message ?? string.Join("; ", poliResult.Result?.Errors.Select(x => x.Message) ?? []);
                 detail = System.Text.RegularExpressions.Regex.Replace(detail, @"https?://\S+|<[^>]+>", "<redacted>");
                 detail = string.Join(' ', detail.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));

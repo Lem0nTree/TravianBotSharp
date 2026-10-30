@@ -24,7 +24,7 @@ public sealed class TaskFailureController(IDbContextFactory<AppDbContext> factor
         }
     }
 
-    public TaskFailureDecision Fail(AccountId account, BaseTask task, bool uncertain)
+    public TaskFailureDecision Fail(AccountId account, BaseTask task, bool uncertain, ConstructionStep? construction = null)
     {
         lock (_gate)
         {
@@ -41,7 +41,7 @@ public sealed class TaskFailureController(IDbContextFactory<AppDbContext> factor
             state.Quarantined |= uncertain;
             var next = Now.AddMinutes(state.Attempts == 1 ? 2 : state.Attempts == 2 ? 5 : 15);
             state.NextAttemptUtc = next.ToString("O");
-            state.Summary = state.Quarantined ? "Needs attention: action outcome uncertain; inspect the game before retrying."
+            state.Summary = state.Quarantined ? HoldSummary(construction)
                 : $"Deferred after {state.Attempts} failure(s); next retry {next.LocalDateTime:HH:mm:ss}.";
             var notify = !state.Alerted && (state.Quarantined || state.Attempts >= 3);
             state.Alerted |= notify;
@@ -55,7 +55,7 @@ public sealed class TaskFailureController(IDbContextFactory<AppDbContext> factor
         }
     }
 
-    public void HoldUncertainInMemory(AccountId account, BaseTask task)
+    public void HoldUncertainInMemory(AccountId account, BaseTask task, ConstructionStep? construction = null)
     {
         lock (_gate)
         {
@@ -63,10 +63,14 @@ public sealed class TaskFailureController(IDbContextFactory<AppDbContext> factor
             if (!_states.TryGetValue(key, out var state))
                 _states[key] = state = new() { AccountId = key.Account, VillageId = key.Village, TaskType = key.Type, Episode = Guid.NewGuid().ToString("N") };
             state.Quarantined = true;
-            state.Summary = "Needs attention: action outcome uncertain; inspect the game before retrying.";
+            state.Summary = HoldSummary(construction);
             Apply(task, state);
         }
     }
+
+    private static string HoldSummary(ConstructionStep? step) => step is null
+        ? "Needs attention: action outcome uncertain; inspect the game before retrying."
+        : $"Needs attention: {step.Type} at slot {step.Slot}, submitted level {step.Level}, is uncertain; inspect the game before retrying.";
 
     // A successful execution is progress; Skip/no-op and failed cleanup do not reset a failure episode.
     public void Succeeded(AccountId account, BaseTask task)

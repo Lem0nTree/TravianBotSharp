@@ -2,6 +2,7 @@
 using MainCore.Commands.Update;
 using MainCore.Tasks.Base;
 using MainCore.Services.Evasion;
+using MainCore.Services.BuildingAutomation;
 
 namespace MainCore.Tasks
 {
@@ -22,7 +23,9 @@ namespace MainCore.Tasks
             protected override string TaskName => "Upgrade building";
         }
 
-        private async ValueTask<Result> HandleAsync(Task task, CancellationToken cancellationToken)
+        private async ValueTask<Result> HandleAsync(Task task, CancellationToken cancellationToken) => await ExecuteAsync(task, cancellationToken);
+
+        public async Task<Result> ExecuteAsync(Task task, CancellationToken cancellationToken)
         {
             Result result;
 
@@ -37,6 +40,15 @@ namespace MainCore.Tasks
                     if (nextExecuteErrors.Count > 0)
                     {
                         task.ExecuteAt = nextExecuteErrors.Min(x => x.NextExecute);
+                    }
+                    else
+                    {
+                        using var db = contextFactory.CreateDbContext();
+                        if (db.Jobs.Any(x => x.VillageId == task.VillageId.Value))
+                        {
+                            logger.Warning("Build stage=blocked village={VillageId} reason=queued-plan-cannot-progress details={Details}", task.VillageId.Value, string.Join("; ", errors.Select(x => x.Message)));
+                            return Retry.Error.WithErrors(errors);
+                        }
                     }
 
                     return Skip.Error.WithErrors(errors);
@@ -72,30 +84,35 @@ namespace MainCore.Tasks
                 }
 
                 logger.Information("Build stage=upgrade_attempt village={VillageId} slot={Slot} building={Building} targetLevel={Level}", task.VillageId.Value, plan.Location, plan.Type, plan.Level);
-                result = await handleUpgradeCommand.HandleAsync(new(task.VillageId, plan), cancellationToken);
-                if (result.IsFailed) return result;
+                var submission = new HandleUpgradeCommand.Command(task.VillageId, plan);
+                result = await handleUpgradeCommand.HandleAsync(submission, cancellationToken);
+                if (result.IsFailed && !result.HasError<UncertainTaskOutcome>()) return result;
+                if (submission.SubmittedStep is not { } step)
+                    return Result.Fail(new UncertainTaskOutcome("The submitted construction step was not recorded. Inspect the game before retrying."));
 
                 try
                 {
-                    result = await updateBuildingCommand.HandleAsync(new(task.VillageId), cancellationToken);
-                    if (result.IsFailed || !ConstructionObserved(task.VillageId, plan))
-                        return Result.Fail(new UncertainTaskOutcome("Construction was clicked, but the target building/queue change was not observed. Inspect the game before retrying."));
+                    var observed = await ConstructionReadback.ObserveAsync(browser, task.VillageId, step,
+                        async () => await updateBuildingCommand.HandleAsync(new(task.VillageId), cancellationToken),
+                        () => ExactQueueObserved(task.VillageId, step), cancellationToken);
+                    if (!observed)
+                        return Result.Fail(new UncertainTaskOutcome("Construction was clicked, but the submitted step was not observed. Inspect the game before retrying.", step));
                 }
                 catch (Exception ex)
                 {
                     logger.Warning("Construction stage=observation_uncertain village={VillageId} slot={Slot} errorType={ErrorType}", task.VillageId.Value, plan.Location, ex.GetType().Name);
-                    return Result.Fail(new UncertainTaskOutcome("Construction was clicked, but its result could not be read. Inspect the game before retrying."));
+                    return Result.Fail(new UncertainTaskOutcome("Construction was clicked, but its result could not be read. Inspect the game before retrying.", step));
                 }
                 task.MadeProgress = true;
-                logger.Information("Construction observed for {Type} at location {Location} toward level {Level}.", plan.Type, plan.Location, plan.Level);
+                logger.Information("Construction observed for {Type} at location {Location} submittedLevel={SubmittedLevel} queueGoal={QueueGoal}.", step.Type, step.Slot, step.Level, plan.Level);
                 if (ShouldYield(task)) { task.ExecuteAt = DateTime.Now; return Result.Ok(); }
             }
         }
 
-        private bool ConstructionObserved(VillageId villageId, NormalBuildPlan plan)
+        private bool ExactQueueObserved(VillageId villageId, ConstructionStep step)
         {
             using var db = contextFactory.CreateDbContext();
-            return HasConstructionEvidence(db, villageId, plan);
+            return db.QueueBuildings.Any(x => x.VillageId == villageId.Value && x.Location == step.Slot && x.Type == step.Type && x.Level >= step.Level && x.CompleteTime > DateTime.Now);
         }
 
         public static bool HasConstructionEvidence(AppDbContext db, VillageId villageId, NormalBuildPlan plan) =>

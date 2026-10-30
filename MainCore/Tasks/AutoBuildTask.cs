@@ -10,7 +10,7 @@ namespace MainCore.Tasks;
 [Handler]
 public sealed partial class AutoBuildTask(
     IChromeBrowser browser, ToDorfCommand.Handler navigate, UpdateBuildingCommand.Handler update,
-    IDbContextFactory<AppDbContext> factory, TaskManager tasks, ILogger logger)
+    IDbContextFactory<AppDbContext> factory, AutoBuildQueuePriority priority, ILogger logger)
 {
     public sealed class Task(AccountId accountId, VillageId villageId) : VillageTask(accountId, villageId)
     {
@@ -23,6 +23,7 @@ public sealed partial class AutoBuildTask(
         task.ExecuteAt = DateTime.Now.AddMinutes(1);
         using (var initial = factory.CreateDbContext())
             if (!task.CanStart(initial)) return Result.Ok();
+        if (priority.TryHandle(task, logger)) return Result.Ok();
         // A complete, freshly read layout is required; parsers returning empty/incomplete data fail closed.
         foreach (var dorf in new[] { 1, 2 })
         {
@@ -50,8 +51,14 @@ public sealed partial class AutoBuildTask(
         NormalBuildPlan? plan;
         try { plan = AutoBuildQueue.TryQueue(db, task.AccountId, task.VillageId); }
         catch (InvalidOperationException ex) { logger.Warning("Auto build skipped: {Reason}", ex.Message); return Result.Ok(); }
-        if (plan is null) return Result.Ok();
-        tasks.AddOrUpdate(new UpgradeBuildingTask.Task(task.AccountId, task.VillageId));
+        if (plan is null)
+        {
+            if (!priority.TryHandle(task, logger)) priority.Log(task, logger,
+                db.QueueBuildings.Any(x => x.VillageId == task.VillageId.Value) || db.Buildings.Any(x => x.VillageId == task.VillageId.Value && x.IsUnderConstruction)
+                    ? "in-game-construction-active" : "no-eligible-upgrade");
+            return Result.Ok();
+        }
+        priority.EnsureDispatcher(task.AccountId, task.VillageId);
         task.MadeProgress = true;
         logger.Information("Auto build queued {Building} level {Level} at slot {Slot}", plan.Type, plan.Level, plan.Location);
         return Result.Ok();

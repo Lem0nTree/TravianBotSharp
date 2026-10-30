@@ -57,6 +57,12 @@ namespace MainCore.Services
             actor.Add(task, first);
         }
 
+        public T EnsureTask<T>(T task) where T : AccountTask
+        {
+            if (!ValidateTaskOwnership(task)) throw new InvalidOperationException("The task does not belong to this account.");
+            return GetActor(task.AccountId).Ensure(task);
+        }
+
         public bool IsExist<T>(AccountId accountId) where T : BaseTask
         {
             var tasks = GetTaskList(accountId)
