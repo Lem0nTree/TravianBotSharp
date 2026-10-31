@@ -2,6 +2,9 @@ namespace MainCore.Services.Evasion;
 
 public static class EvasionRules
 {
+    public static readonly TimeSpan TroopLead = TimeSpan.FromSeconds(10);
+    public static readonly TimeSpan TroopPreparationLead = TimeSpan.FromSeconds(28);
+
     public static long[] Allocate(IReadOnlyList<long> stock, long capacity)
     {
         if (stock.Count != 4 || capacity < 0 || stock.Any(x => x < 0))
@@ -29,6 +32,13 @@ public static class EvasionRules
     public static bool CanSendTroops(bool? isCapital, int source, int destination, IEnumerable<int> owned) =>
         isCapital == false && IsOwnedDestination(source, destination, owned);
 
+    public static int TroopDestination(int source, int configured, IEnumerable<int> owned)
+    {
+        var villages = owned.Distinct().ToArray();
+        if (!villages.Contains(source)) return 0;
+        return IsOwnedDestination(source, configured, villages) ? configured : villages.Where(x => x > 0 && x != source).Order().FirstOrDefault();
+    }
+
     // Remain away through every known hit, but cancel within 90 seconds and before arrival.
     public static DateTimeOffset? SafeCancelAt(DateTimeOffset sentAt, DateTimeOffset arrivalAt,
         IEnumerable<DateTimeOffset> impacts, TimeSpan impactMargin, TimeSpan cancellationMargin)
@@ -36,13 +46,13 @@ public static class EvasionRules
         if (impactMargin < TimeSpan.Zero || cancellationMargin < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(impactMargin));
         var hits = impacts.Where(x => x >= sentAt).OrderBy(x => x).ToArray();
         if (hits.Length == 0) return null;
-        var at = hits[0] + impactMargin;
+        var at = new[] { hits[0] + impactMargin, sentAt.AddSeconds(10) }.Max();
         // A cancelled movement takes the elapsed outbound time to return home. A later
         // wave also needs protection if its next evasion preparation begins before then.
         foreach (var hit in hits.Skip(1))
         {
-            if (hit.AddSeconds(-28) > at + (at - sentAt)) break;
-            at = hit + impactMargin;
+            if (hit - TroopPreparationLead > at + (at - sentAt)) break;
+            at = new[] { at, hit + impactMargin }.Max();
         }
         return at < sentAt.AddSeconds(90) - cancellationMargin && at < arrivalAt ? at : null;
     }

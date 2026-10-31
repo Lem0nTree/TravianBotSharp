@@ -39,10 +39,9 @@ public sealed partial class EvasionScanTask(IChromeBrowser browser, SwitchVillag
         using var db = factory.CreateDbContext();
         if (!task.CanStart(db)) { trace.Event("scan", "disabled-or-recovery-complete"); return Result.Ok(); }
         task.ExecuteAt = DateTime.Now.Add(EvasionSidebarCoordinator.PollInterval);
-        var destination = db.ByName(task.VillageId, VillageSettingEnums.EvasionDestinationId);
-        trace.SetDetails(destination, null, null);
+        var configuredDestination = db.ByName(task.VillageId, VillageSettingEnums.EvasionDestinationId);
+        trace.SetDetails(configuredDestination, null, null);
         var owned = db.Villages.Where(x => x.AccountId == task.AccountId.Value).Select(x => x.Id).ToArray();
-        var destinationValid = EvasionRules.IsOwnedDestination(task.VillageId.Value, destination, owned);
         if (!browser.IsInitialized) { trace.Retry("scan", "browser-unavailable"); return Result.Ok(); }
         if (!await LoginParser.IsIngamePage(browser.CurrentPage))
         {
@@ -94,7 +93,6 @@ public sealed partial class EvasionScanTask(IChromeBrowser browser, SwitchVillag
         if (await VillagePanelParser.GetCurrentVillageId(browser.CurrentPage) != task.VillageId) { trace.Retry("scan", "active-village-changed-after-navigation"); return Result.Ok(); }
         await ReconcileUncertainAsync(db, task, unresolved);
         if (!underAttack) return Result.Ok();
-        if (!destinationValid) { logger.Warning("Evasion scan skipped account={AccountId} village={VillageId} stage=validate reason=destination-not-another-owned-village destination={DestinationId}", task.AccountId.Value, task.VillageId.Value, destination); return Result.Ok(); }
         trace.Retry("parse", "reading-incoming-movements");
         var report = RallyDiagnostics.RequireAttackWhenFlagged(await IncomingAttackAdapter.ReadAsync(browser.CurrentPage), underAttack);
         RallyDiagnostics.Log(logger, task.AccountId.Value, task.VillageId.Value, "scan", report);
@@ -103,11 +101,13 @@ public sealed partial class EvasionScanTask(IChromeBrowser browser, SwitchVillag
         {
             foreach (var kind in new[] { "merchant", "troop" })
             {
+                var destination = kind == "troop" ? EvasionRules.TroopDestination(task.VillageId.Value, configuredDestination, owned) : configuredDestination;
                 void Decision(string reason) => EvasionDecisionLog.Scheduling(logger, task.AccountId.Value, task.VillageId.Value, attack.Id, kind, destination, attack.ImpactAt, reason);
                 if (attack.ImpactAt <= DateTimeOffset.UtcNow) { Decision("impact-expired"); continue; }
                 var enabled = db.BooleanByName(task.VillageId, kind == "merchant" ? VillageSettingEnums.ResourceEvasionEnable : VillageSettingEnums.TroopEvasionEnable);
                 if (!enabled) { Decision("disabled"); continue; }
                 if (kind == "troop" && db.ByName(task.VillageId, VillageSettingEnums.ConfirmedCapitalStatus) != 2) { Decision("capital-or-unknown-excluded"); continue; }
+                if (!EvasionRules.IsOwnedDestination(task.VillageId.Value, destination, owned)) { Decision("destination-not-another-owned-village"); continue; }
                 var created = EvasionStore.TryPlan(db, new EvasionDispatch { AccountId = task.AccountId.Value, VillageId = task.VillageId.Value,
                     DestinationId = destination, AttackId = attack.Id, Kind = kind, ImpactUtc = attack.ImpactAt.ToUniversalTime().ToString("O"), Payload = "{}" });
                 if (kind == "merchant")
@@ -125,9 +125,9 @@ public sealed partial class EvasionScanTask(IChromeBrowser browser, SwitchVillag
                 {
                     var planned = db.EvasionDispatches.AsNoTracking().SingleOrDefault(x => x.AccountId == task.AccountId.Value && x.VillageId == task.VillageId.Value && x.AttackId == attack.Id && x.Kind == kind);
                     if (planned is null || planned.State != "Planned" || planned.DestinationId != destination || !DateTimeOffset.TryParse(planned.ImpactUtc, out var impact)) { Decision("existing-record-not-planned-or-destination-changed"); continue; }
-                    if (DateTimeOffset.UtcNow > impact.AddSeconds(-19)) { Decision("missed-deadline"); continue; }
+                    if (DateTimeOffset.UtcNow > impact - EvasionRules.TroopLead + TimeSpan.FromSeconds(1)) { Decision("missed-deadline"); continue; }
                     var operation = new EvasionTroopTask.Task(task.AccountId, task.VillageId, attack.Id, destination, impact)
-                    { ExecuteAt = impact.AddSeconds(-28).LocalDateTime };
+                    { ExecuteAt = (impact - EvasionRules.TroopPreparationLead).LocalDateTime };
                     if (!taskManager.GetTaskList(task.AccountId).Any(x => x is EvasionTroopTask.Task && x.Key == operation.Key))
                     { taskManager.Add(operation); Decision(created ? "new-enqueued" : "existing-enqueued"); }
                     else Decision("already-enqueued");

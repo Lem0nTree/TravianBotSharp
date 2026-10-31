@@ -10,14 +10,12 @@ public class ConfirmationAndMovementTests(PlaywrightFixture fixture) : ParserTes
     {
         await using var context = await CreateContextAsync();
         var page = await context.NewPageAsync();
-        var inputs = string.Join("", Enumerable.Range(1, 11).Select(i => $"<input name='troop[t{i}]' value='{i}'>"));
-        // Synthetic confirmation; not captured from the live game.
-        await page.SetContentAsync($"<h1>Confirm</h1><form><input name='x' value='1'><input name='y' value='2'><input name='eventType' value='5'>{inputs}<div class='duration'><span class='timer' value='120'></span></div><button>Send</button></form>");
         var amounts = Enumerable.Range(1, 11).Select(i => (long)i).ToArray();
-        var confirm = await TroopConfirmationAdapter.FindAsync(page, 1, 2, amounts);
+        await page.SetContentAsync(TroopPreviewFixture.Markup(amounts, x: 1, y: 2));
+        var confirm = await TroopConfirmationAdapter.FindAsync(page, 1, 1, 2, amounts);
         confirm.ShouldNotBeNull();
         confirm.Duration.ShouldBe(TimeSpan.FromSeconds(120));
-        (await TroopConfirmationAdapter.FindAsync(page, 1, 3, amounts)).ShouldBeNull();
+        (await TroopConfirmationAdapter.FindAsync(page, 1, 1, 3, amounts)).ShouldBeNull();
     }
 
     [Fact]

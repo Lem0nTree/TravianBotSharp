@@ -63,6 +63,19 @@ public static class EvasionStore
             """) == 1;
     }
 
+    // The preview may be prepared well before the actual final send attempt.
+    // Refresh its conservative timestamp before that one potentially committing click.
+    public static bool BeginFinalTroopSubmit(AppDbContext db, EvasionDispatch key, DateTimeOffset attemptedAt)
+    {
+        EnsureSchema(db);
+        var attempted = attemptedAt.ToUniversalTime().ToString("O");
+        return key.Kind == "troop" && db.Database.ExecuteSqlInterpolated($"""
+            UPDATE "EvasionDispatches" SET "SentUtc" = {attempted}
+            WHERE "AccountId" = {key.AccountId} AND "VillageId" = {key.VillageId}
+              AND "AttackId" = {key.AttackId} AND "Kind" = {"troop"} AND "State" = {"Submitting"};
+            """) == 1;
+    }
+
     public static bool RecordSent(AppDbContext db, EvasionDispatch key, string movementId, DateTimeOffset sentAt, DateTimeOffset arrivalAt)
     {
         if (string.IsNullOrWhiteSpace(movementId) || movementId.Length > 200 || arrivalAt <= sentAt)

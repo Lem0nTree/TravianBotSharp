@@ -57,7 +57,7 @@ public static class EvasionDecisionLog
             if (Seen.Count > 4096)
                 foreach (var expired in Seen.Where(x => now - x.Value.At > TimeSpan.FromHours(1)).Select(x => x.Key).ToArray()) Seen.TryRemove(expired, out _);
         }
-        var target = impact.AddSeconds(kind == "merchant" ? -30 : -20);
+        var target = kind == "merchant" ? impact.AddSeconds(-30) : impact - EvasionRules.TroopLead;
         new EvasionTrace(logger, account, village, attack, kind, destination, impact, target).Event("schedule", reason);
     }
 }

@@ -47,8 +47,10 @@ public class EvasionTests
         EvasionRules.IsSendWindow(impact.AddSeconds(-30), impact, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(1)).ShouldBeTrue();
         EvasionRules.IsSendWindow(impact.AddSeconds(-27), impact, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(3)).ShouldBeTrue();
         EvasionRules.IsSendWindow(impact.AddSeconds(-26), impact, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(3)).ShouldBeFalse();
-        EvasionRules.IsSendWindow(impact.AddSeconds(-17), impact, TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(3)).ShouldBeTrue();
-        EvasionRules.IsSendWindow(impact.AddSeconds(-16), impact, TimeSpan.FromSeconds(20), TimeSpan.FromSeconds(3)).ShouldBeFalse();
+        EvasionRules.IsSendWindow(impact.AddSeconds(-11), impact, EvasionRules.TroopLead, TimeSpan.FromSeconds(1)).ShouldBeFalse();
+        EvasionRules.IsSendWindow(impact.AddSeconds(-10), impact, EvasionRules.TroopLead, TimeSpan.FromSeconds(1)).ShouldBeTrue();
+        EvasionRules.IsSendWindow(impact.AddSeconds(-9), impact, EvasionRules.TroopLead, TimeSpan.FromSeconds(1)).ShouldBeTrue();
+        EvasionRules.IsSendWindow(impact.AddSeconds(-8), impact, EvasionRules.TroopLead, TimeSpan.FromSeconds(1)).ShouldBeFalse();
         EvasionRules.IsSendWindow(impact, impact, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(1)).ShouldBeFalse();
     }
 
@@ -61,6 +63,24 @@ public class EvasionTests
         EvasionRules.CanSendTroops(false, 1, 3, owned).ShouldBeFalse();
         EvasionRules.CanSendTroops(false, 1, 1, owned).ShouldBeFalse();
         EvasionRules.CanSendTroops(false, 1, 2, owned).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void TroopDestinationUsesConfiguredOwnedVillageOrAnotherOwnedFallback()
+    {
+        EvasionRules.TroopDestination(1, 3, [1, 2, 3]).ShouldBe(3);
+        foreach (var configured in new[] { 0, 1, 99 }) EvasionRules.TroopDestination(1, configured, [3, 1, 2]).ShouldBe(2);
+        EvasionRules.TroopDestination(1, 2, [1]).ShouldBe(0);
+        EvasionRules.TroopDestination(1, 2, [2, 3]).ShouldBe(0);
+    }
+
+    [Fact]
+    public void CancellationNeverPrecedesTenSecondsAfterSendEvenForCloseLateWaves()
+    {
+        var sent = DateTimeOffset.Parse("2026-01-01T12:00:00Z");
+        EvasionRules.SafeCancelAt(sent, sent.AddMinutes(3), [sent.AddSeconds(7), sent.AddSeconds(8)], TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3)).ShouldBe(sent.AddSeconds(10));
+        EvasionRules.SafeCancelAt(sent, sent.AddMinutes(3), [sent.AddSeconds(10)], TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3)).ShouldBe(sent.AddSeconds(11));
+        EvasionRules.SafeCancelAt(sent, sent.AddMinutes(3), [sent.AddSeconds(10), sent.AddSeconds(25)], TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3)).ShouldBe(sent.AddSeconds(26));
     }
 
     [Fact]
@@ -111,7 +131,10 @@ public class EvasionTests
         {
             EvasionStore.BeginSubmit(restarted, key).ShouldBeFalse();
             var now = DateTimeOffset.UtcNow;
+            EvasionStore.BeginFinalTroopSubmit(restarted, key, now).ShouldBeTrue();
+            DateTimeOffset.Parse(restarted.EvasionDispatches.AsNoTracking().Single().SentUtc!).ShouldBe(now);
             EvasionStore.RecordSent(restarted, key, "movement-1", now, now.AddMinutes(2)).ShouldBeTrue();
+            EvasionStore.BeginFinalTroopSubmit(restarted, key, now.AddSeconds(1)).ShouldBeFalse();
             EvasionStore.BeginCancel(restarted, key, "other").ShouldBeFalse();
             EvasionStore.BeginCancel(restarted, key, "movement-1").ShouldBeTrue();
             EvasionStore.BeginCancel(restarted, key, "movement-1").ShouldBeFalse();

@@ -59,6 +59,7 @@ public sealed partial class EvasionCancelTask(IChromeBrowser browser, SwitchVill
             .Select(x => x.ImpactUtc).ToArray().Select(x => DateTimeOffset.TryParse(x, out var hit) ? hit : DateTimeOffset.MinValue)
             .Where(x => x != DateTimeOffset.MinValue).Concat(report.Attacks.Select(x => x.ImpactAt));
         var safeAt = EvasionRules.SafeCancelAt(sent, arrival, impacts, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3));
+        trace.SetDetails(saved.DestinationId, impact, safeAt);
         if (safeAt is null || now >= sent.AddSeconds(87) || now >= arrival)
         { return Skip("cancel", "unsafe-cancellation-window-manual-inspection-required"); }
         if (now < safeAt)

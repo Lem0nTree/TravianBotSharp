@@ -6,6 +6,24 @@ namespace MainCore.Services.Evasion;
 public static class RallyMovementAdapter
 {
     public sealed record MatchedMovement(string Id, TimeSpan Remaining);
+
+    public static async Task<MatchedMovement?> WaitForUniqueNewAsync(IPage page, IReadOnlySet<string> before, long destinationTile,
+        IReadOnlyList<long> amounts, TimeSpan timeout)
+    {
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        do
+        {
+            try
+            {
+                var movement = await FindUniqueNewAsync(page, before, destinationTile, amounts);
+                if (movement is not null) return movement;
+            }
+            catch (PlaywrightException ex) when (ex.Message.Contains("Execution context was destroyed", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("navigation", StringComparison.OrdinalIgnoreCase) || ex.Message.Contains("Cannot find context", StringComparison.OrdinalIgnoreCase)) { }
+            await System.Threading.Tasks.Task.Delay(100);
+        } while (DateTimeOffset.UtcNow < deadline);
+        return null;
+    }
     public static async Task<long?> SourceTileAsync(IPage page, string sourceName)
     {
         var ids = new HashSet<long>();
