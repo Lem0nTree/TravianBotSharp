@@ -12,7 +12,13 @@
             var (troop, amount, trainWhenLowResource) = command;
             Result result;
 
-            var maxAmount = await TrainTroopParser.GetMaxAmount(browser.CurrentPage, troop);
+            var availability = await TrainTroopParser.ReadAvailability(browser.CurrentPage, troop);
+            if (!availability.Available)
+            {
+                logger.Warning("Training {Troop} deferred without submitting: {Reason}", troop, availability.Reason);
+                return Skip.Error;
+            }
+            var maxAmount = availability.Maximum;
             if (maxAmount == 0)
             {
                 return MissingResource.Error(troop);
@@ -23,6 +29,7 @@
                 return MissingResource.Error(troop);
             }
 
+            if (trainWhenLowResource) amount = Math.Min(amount, maxAmount);
             result = await Train(troop, amount);
             if (result.IsFailed) return result;
 

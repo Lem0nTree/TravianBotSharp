@@ -11,6 +11,8 @@ using TravianBotSharp.ControlProtocol;
 
 namespace MainCore.Test;
 
+// Real-time Rx delivery assertions must not compete with parallel browser/database fixtures.
+[Collection("MCP bridge")]
 public sealed class ChatControlAcceptanceTests
 {
     [Fact]

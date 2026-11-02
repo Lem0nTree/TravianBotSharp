@@ -58,6 +58,12 @@ namespace MainCore.Tasks
                 result = await trainTroopCommand.HandleAsync(new(troop, amount, trainWhenLowResource), cancellationToken);
                 if (result.IsFailed)
                 {
+                    if (result.HasError<Skip>())
+                    {
+                        // A missing research/control is not an account failure.
+                        // Preserve the user's troop choice and defer to the next cycle.
+                        continue;
+                    }
                     if (result.HasError<MissingResource>())
                     {
                         break;

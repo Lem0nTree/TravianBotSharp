@@ -100,17 +100,23 @@ public sealed class ControlMutations(IDbContextFactory<AppDbContext> factory, Ta
                     var changes = new Dictionary<VillageSettingEnums, int>();
                     foreach (var property in patch.EnumerateObject())
                     {
-                        if (!Enum.TryParse<VillageSettingEnums>(property.Name, false, out var setting) || setting is not (VillageSettingEnums.AutoBuildEnable or VillageSettingEnums.AutoRefreshEnable or VillageSettingEnums.AutoRefreshMin or VillageSettingEnums.AutoRefreshMax or VillageSettingEnums.AutoClaimQuestEnable)) throw new ControlException("invalid_settings", "The patch contains an unsupported key.");
+                        if (!Enum.TryParse<VillageSettingEnums>(property.Name, false, out var setting) || !VillageControlPolicy.Editable.Contains(setting) || setting.ToString() != property.Name) throw new ControlException("invalid_settings", "The patch contains an unsupported key.");
                         var value = property.Value.GetInt32();
-                        if ((setting is VillageSettingEnums.AutoRefreshMin or VillageSettingEnums.AutoRefreshMax) ? value < 1 || value > 1440 : value is not (0 or 1)) throw new ControlException("invalid_settings", "Boolean values must be 0 or 1; refresh intervals must be 1 to 1440 minutes.");
+                        if (!VillageControlPolicy.IsValidValue(setting, value)) throw new ControlException("invalid_settings", "Invalid setting value; use 0 or 1 for booleans and listed troop IDs for training selections.");
                         if (!changes.TryAdd(setting, value)) throw new ControlException("invalid_settings", "Duplicate setting.");
                     }
                     if (changes.Count == 0) throw new ControlException("invalid_settings", "The patch is empty.");
+                    var trainingChange = changes.Keys.Any(VillageControlPolicy.IsTraining);
+                    if (trainingChange && (tasks.GetStatus(aid) is not (StatusEnums.Paused or StatusEnums.Offline) || tasks.IsExecuting(aid) || tasks.GetCurrentTask(aid) is not null)) throw new ControlException("account_not_quiescent", "Pause the account and wait for the current task to finish before changing training.");
+                    var oldTraining = trainingChange ? tasks.GetTaskList(aid).OfType<TrainTroopTask.Task>().Where(x => x.VillageId == vid).ToArray() : [];
+                    if (oldTraining.Any(x => x.Stage != StageEnums.Waiting)) throw new ControlException("account_not_quiescent", "Wait for training to finish before changing training settings.");
                     var current = AppDbContext.VillageDefaultSettings.ToDictionary(x => x.Key, x => x.Value);
                     foreach (var row in db.VillagesSetting.Where(x => x.VillageId == village)) current[row.Setting] = row.Value;
                     var previous = changes.Keys.ToDictionary(x => x, x => current[x]);
                     foreach (var change in changes) current[change.Key] = change.Value;
                     if (current[VillageSettingEnums.AutoRefreshMin] > current[VillageSettingEnums.AutoRefreshMax]) throw new ControlException("invalid_settings", "Minimum refresh interval exceeds maximum.");
+                    if (trainingChange && VillageControlPolicy.ValidateTraining(db, village, current) is string validation) throw new ControlException("invalid_settings", validation);
+                    if (trainingChange && current[VillageSettingEnums.TrainTroopEnable] == 0 && oldTraining.Any(x => x.IsQuarantined || !string.IsNullOrEmpty(x.FailureStatus))) throw new ControlException("task_held", "Inspect the held training task before disabling it.");
                     foreach (var change in changes)
                     {
                         var row = db.VillagesSetting.FirstOrDefault(x => x.VillageId == village && x.Setting == change.Key);
@@ -120,7 +126,18 @@ public sealed class ControlMutations(IDbContextFactory<AppDbContext> factory, Ta
                     db.SaveChanges();
                     outcomeMayHaveChanged = true;
                     transaction.Commit();
-                    db.TriggerTask(tasks, aid, vid, changes);
+                    db.TriggerTask(tasks, aid, vid, changes.Where(x => !VillageControlPolicy.IsTraining(x.Key)).ToDictionary(x => x.Key, x => x.Value));
+                    if (trainingChange)
+                    {
+                        foreach (var old in oldTraining) tasks.Remove(aid, old);
+                        if (current[VillageSettingEnums.TrainTroopEnable] == 1)
+                        {
+                            var held = oldTraining.FirstOrDefault(x => x.IsQuarantined || !string.IsNullOrEmpty(x.FailureStatus));
+                            var replacement = new TrainTroopTask.Task(aid, vid) { ExecuteAt = held?.ExecuteAt ?? DateTime.Now, IsQuarantined = held?.IsQuarantined ?? false, FailureStatus = held?.FailureStatus ?? "" };
+                            tasks.EnsureTask(replacement);
+                        }
+                        notifications.Enqueue(new TasksModified(aid));
+                    }
                     var after = Settings(db, village);
                     result = new { BeforeRevision = Hash(before), AfterRevision = Hash(after), Revision = Hash(after), Changed = changes.ToDictionary(x => x.Key.ToString(), x => new { Before = previous[x.Key], After = x.Value }), Completed = true };
                 }

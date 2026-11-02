@@ -72,7 +72,7 @@ public sealed class ApplicationControlService(IDbContextFactory<AppDbContext> fa
                     {
                         var overrides = db.VillagesSetting.AsNoTracking().Where(x => x.VillageId == villageId).ToArray();
                         var settings = AppDbContext.VillageDefaultSettings.OrderBy(x => x.Key).Select(x => new { Name = x.Key.ToString(), Value = overrides.FirstOrDefault(y => y.Setting == x.Key)?.Value ?? x.Value, Default = x.Value }).ToArray();
-                        result = new { Revision = Revision(settings), Settings = settings, EditableKeys = new[] { "AutoBuildEnable", "AutoRefreshEnable", "AutoRefreshMin", "AutoRefreshMax", "AutoClaimQuestEnable" } };
+                        result = new { Revision = Revision(settings), Settings = settings, EditableKeys = VillageControlPolicy.Editable.Select(x => x.ToString()).ToArray(), TrainingOptions = VillageControlPolicy.Options((TribeEnums)(overrides.FirstOrDefault(x => x.Setting == VillageSettingEnums.Tribe)?.Value ?? AppDbContext.VillageDefaultSettings[VillageSettingEnums.Tribe])) };
                     }
                     else throw new ControlError("unknown_method", "Unknown control method.");
                 }

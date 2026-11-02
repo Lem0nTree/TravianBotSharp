@@ -40,6 +40,16 @@ All 15 tools were exercised through MCP against the installed desktop applicatio
 
 The complete Release test suite was run again for installation and passed **239/239**, with no skipped tests. Detailed installation manifests and live-data checks remain only in local backup/test records; they are not committed to the repository.
 
+## Training control follow-up (2.13.0.18)
+
+Village settings now expose troop training enablement and the five training-building selections, with tribe-specific legal choices. Training changes require a quiescent paused/offline account, validate the saved quantity/interval ranges and available buildings, preserve failure holds, and replace an unheld waiting task so previous building selections cannot leak into the next cycle. Existing batch sizes and intervals are retained.
+
+Unavailable or unresearched troops are deferred without submitting a form or pausing the account. A partial batch is capped at the displayed maximum only when the existing low-resource training option permits it. Research remains outside the MCP tool set.
+
+Release solution build passed with zero warnings/errors; the complete suite passed **259/259**, with no skipped tests. Added coverage includes training validation, task replacement/replay/holds, absent or ambiguous troop controls, malformed maximums, and partial-batch limits. The real-time observation acceptance tests now use the existing nonparallel bridge collection, retaining their five-second deadline and assertions after contention surfaced in the expanded suite.
+
+The installed 2.13.0.18 application was restarted and the native MCP connection queried it successfully. Live settings read-back confirmed construction disabled, empty planned queues, and Spearman-only training in the two requested villages. The first available village submitted a batch of 15 Spearmen; the village awaiting research safely deferred training, retained its selection, and scheduled its next normal cycle. The account remained Online with no held tasks. Installation preserved user data and the connected MCP console; private village details and backups remain outside the repository.
+
 ## Repeatable commands
 
 Run with the .NET 10 SDK on Windows:
