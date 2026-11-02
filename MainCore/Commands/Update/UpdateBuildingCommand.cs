@@ -101,6 +101,9 @@ namespace MainCore.Commands.Update
 
             var completeQueueBuildings = dbQueueBuildings
                 .Where(x => x.CompleteTime < DateTime.Now)
+                // Identical rows have interchangeable timers: only the fresh layout
+                // can establish which slot completed.
+                .Where(x => dbQueueBuildings.Count(other => other.Type == x.Type && other.Level == x.Level) == 1)
                 .OrderBy(x => x.Level)
                 .ToList();
 
@@ -119,92 +122,42 @@ namespace MainCore.Commands.Update
                 }
             }
 
-            var sets = new HashSet<string>();
+            // Reconcile all rows before inferring slots, consuming each saved row once.
+            var unmatched = new List<QueueBuilding>(dbQueueBuildings);
+            var observedQueue = new List<QueueBuilding>();
             foreach (var dto in queueBuildingDtos)
             {
-                var buildingType = BuildingNameParser.Parse(dto.Type);
-
-                // same level same type but different location, bot need a way to check that
-                if (sets.Add($"{dto.Level}-{dto.Type}"))
+                var type = BuildingNameParser.Parse(dto.Type);
+                var row = unmatched.FirstOrDefault(x => x.Level == dto.Level && x.Type == type);
+                if (row is null)
                 {
-                    var dbQueueBuilding = dbQueueBuildings.Find(x => x.Level == dto.Level && x.Type == buildingType);
-                    if (dbQueueBuilding is null)
-                    {
-                        var building = dto.ToEntity(villageId);
-                        dbQueueBuildings.Add(building);
-                        context.Add(building);
-                    }
-                    else
-                    {
-                        dto.To(dbQueueBuilding);
-                    }
+                    row = dto.ToEntity(villageId);
+                    context.Add(row);
                 }
                 else
                 {
-                    var dbDuplicateQueueBuildings = dbQueueBuildings
-                        .FindAll(x => x.Level == dto.Level && x.Type == buildingType);
-
-                    if (dbDuplicateQueueBuildings.Count > 1)
-                    {
-                        dto.To(dbDuplicateQueueBuildings[1]);
-                    }
-                    else
-                    {
-                        var building = dto.ToEntity(villageId);
-                        dbQueueBuildings.Add(building);
-                        context.Add(building);
-                    }
+                    unmatched.Remove(row);
+                    dto.To(row);
                 }
-
-                var missingLocation = dbQueueBuildings
-                    .Where(x => x.Location == -1)
-                    .ToList();
-
-                if (missingLocation.Count != 0)
-                {
-                    var underConstruction = dbBuildings
-                        .Where(x => x.IsUnderConstruction)
-                        .ToList();
-
-                    for (var i = 0; i < missingLocation.Count; i++)
-                    {
-                        var queueBuilding = missingLocation[i];
-
-                        var building = underConstruction.Find(x => x.Type == queueBuilding.Type && x.Level == queueBuilding.Level - 1);
-
-                        if (building is null)
-                        {
-                            building = underConstruction.Find(x => x.Type == queueBuilding.Type && x.Level == queueBuilding.Level - 2);
-
-                            if (building is null)
-                            {
-                                continue;
-                            }
-                        }
-                        queueBuilding.Location = building.Location;
-                        if (underConstruction.Count(x => x.Type == queueBuilding.Type) > 1)
-                        {
-                            underConstruction.Remove(building);
-                        }
-                    }
-                }
+                observedQueue.Add(row);
             }
 
-            if (dbQueueBuildings.Count > queueBuildingDtos.Count)
+            foreach (var stale in unmatched)
             {
-                for (var i = 0; i < dbQueueBuildings.Count; i++)
+                context.Remove(stale);
+                // A disappearing duplicate does not prove which slot completed.
+                if (observedQueue.Any(x => x.Type == stale.Type && x.Level == stale.Level))
                 {
-                    var queueBuilding = dbQueueBuildings[i];
-                    if (queueBuildingDtos.All(x => x.Level != queueBuilding.Level || BuildingNameParser.Parse(x.Type) != queueBuilding.Type))
-                    {
-                        context.Remove(queueBuilding);
-                        var building = dbBuildings.Find(x => x.Location == queueBuilding.Location);
-                        if (building is null) continue;
-
-                        building.Level = queueBuilding.Level;
-                    }
+                    foreach (var remaining in observedQueue.Where(x => x.Type == stale.Type && x.Level == stale.Level))
+                        remaining.Location = -1;
+                    continue;
                 }
+                var building = dbBuildings.Find(x => x.Location == stale.Location);
+                if (building is not null && buildingDtos.All(x => x.Location != building.Location))
+                    building.Level = Math.Max(building.Level, stale.Level);
             }
+
+            ResolveQueueLocations(observedQueue, dbBuildings.Where(x => buildingDtos.Any(dto => dto.Location == x.Location)).ToList());
 
             context.VillagesSetting
                 .Where(x => x.VillageId == villageId.Value)
@@ -212,6 +165,27 @@ namespace MainCore.Commands.Update
                 .ExecuteUpdate(x => x.SetProperty(x => x.Value, (int)tribe));
 
             context.SaveChanges();
+        }
+        private static void ResolveQueueLocations(List<QueueBuilding> queue, List<Building> buildings)
+        {
+            foreach (var group in queue.GroupBy(x => (x.Type, x.Level)))
+            {
+                var rows = group.ToList();
+                var candidates = buildings.Where(x => x.IsUnderConstruction && x.Type == group.Key.Type
+                    && (x.Level == group.Key.Level - 1 || x.Level == group.Key.Level - 2)).ToList();
+                // Repair old duplicate slot assignments instead of treating them as proof.
+                foreach (var duplicate in rows.Where(x => x.Location != -1).GroupBy(x => x.Location).Where(x => x.Count() > 1))
+                    foreach (var row in duplicate) row.Location = -1;
+
+                var occupied = rows.Where(x => x.Location != -1).Select(x => x.Location).ToHashSet();
+                candidates.RemoveAll(x => occupied.Contains(x.Location));
+                var missing = rows.Where(x => x.Location == -1).ToList();
+                // Equal multiplicities prove all candidate slots have this target.
+                // Otherwise keep the unknown slot for safe construction inspection.
+                if (missing.Count != candidates.Count) continue;
+                for (var index = 0; index < missing.Count; index++)
+                    missing[index].Location = candidates[index].Location;
+            }
         }
     }
 }
