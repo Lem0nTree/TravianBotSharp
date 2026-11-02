@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace MainCore.Test.Telegram;
 
+[Collection("Telegram delivery timing")]
 public class TelegramDeliveryTests
 {
     private sealed class Store : ITelegramSettingsStore

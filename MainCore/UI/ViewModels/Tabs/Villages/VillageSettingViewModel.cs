@@ -60,6 +60,8 @@ namespace MainCore.UI.ViewModels.Tabs.Villages
         [ReactiveCommand(RunInBackground = true)]
         private async Task Save()
         {
+            var AccountId = this.AccountId;
+            var VillageId = this.VillageId;
             var result = await _villageSettingInputValidator.ValidateAsync(VillageSettingInput);
             if (!result.IsValid)
             {
@@ -67,31 +69,39 @@ namespace MainCore.UI.ViewModels.Tabs.Villages
                 return;
             }
 
+            using var control = await _taskManager.AcquireControlAsync(AccountId);
+            if (AccountId != this.AccountId || VillageId != this.VillageId) return;
             using var context = _contextFactory.CreateDbContext();
+            if (!context.Villages.Any(x => x.Id == VillageId.Value && x.AccountId == AccountId.Value)) return;
             var settings = VillageSettingInput.Get();
             if (settings[VillageSettingEnums.ResourceEvasionEnable] == 1 || settings[VillageSettingEnums.TroopEvasionEnable] == 1)
             {
                 var target = settings[VillageSettingEnums.EvasionDestinationId];
                 if (target == VillageId.Value || !context.Villages.Any(x => x.AccountId == AccountId.Value && x.Id == target))
                 {
-                    await _dialogService.SendMessage("Error", "Choose another village belonging to this account as the evasion destination.");
+                    control.Dispose();
+                await _dialogService.SendMessage("Error", "Choose another village belonging to this account as the evasion destination.");
                     return;
                 }
                 if (settings[VillageSettingEnums.TroopEvasionEnable] == 1 && settings[VillageSettingEnums.ConfirmedCapitalStatus] != 2)
                 {
-                    await _dialogService.SendMessage("Error", "Troop evasion requires this village to be explicitly confirmed as non-capital.");
+                    control.Dispose();
+                await _dialogService.SendMessage("Error", "Troop evasion requires this village to be explicitly confirmed as non-capital.");
                     return;
                 }
             }
             context.SaveVillageSetting(VillageId, settings);
             context.TriggerTask(_taskManager, AccountId, VillageId, settings);
 
-            await _dialogService.SendMessage("Information", "Settings saved.");
+            control.Dispose();
+                await _dialogService.SendMessage("Information", "Settings saved.");
         }
 
         [ReactiveCommand(RunInBackground = true)]
         private async Task Import()
         {
+            var AccountId = this.AccountId;
+            var VillageId = this.VillageId;
             var path = await _dialogService.OpenFileDialog();
             Dictionary<VillageSettingEnums, int> settings;
             try
@@ -105,6 +115,7 @@ namespace MainCore.UI.ViewModels.Tabs.Villages
                 return;
             }
 
+            if (AccountId != this.AccountId || VillageId != this.VillageId) return;
             // Capital is a property of this village, never of a settings template.
             using (var current = _contextFactory.CreateDbContext())
                 foreach (var key in new[] { VillageSettingEnums.ConfirmedCapitalStatus, VillageSettingEnums.ResourceEvasionEnable, VillageSettingEnums.TroopEvasionEnable, VillageSettingEnums.EvasionDestinationId })
@@ -117,7 +128,10 @@ namespace MainCore.UI.ViewModels.Tabs.Villages
                 await _dialogService.SendMessage("Error", string.Join(Environment.NewLine, result.Errors.Select(x => x.ErrorMessage)));
                 return;
             }
+            using var control = await _taskManager.AcquireControlAsync(AccountId);
+            if (AccountId != this.AccountId || VillageId != this.VillageId) return;
             using var context = _contextFactory.CreateDbContext();
+            if (!context.Villages.Any(x => x.Id == VillageId.Value && x.AccountId == AccountId.Value)) return;
             settings.Remove(VillageSettingEnums.Tribe);
             settings.Remove(VillageSettingEnums.ConfirmedCapitalStatus);
             settings.Remove(VillageSettingEnums.ResourceEvasionEnable);
@@ -127,7 +141,8 @@ namespace MainCore.UI.ViewModels.Tabs.Villages
             context.SaveVillageSetting(VillageId, settings);
             context.TriggerTask(_taskManager, AccountId, VillageId, settings);
 
-            await _dialogService.SendMessage("Information", "Settings imported");
+            control.Dispose();
+                await _dialogService.SendMessage("Information", "Settings imported");
         }
 
         [ReactiveCommand(RunInBackground = true)]

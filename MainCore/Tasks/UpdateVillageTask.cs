@@ -1,4 +1,4 @@
-﻿using MainCore.Commands.Navigate;
+using MainCore.Commands.Navigate;
 using MainCore.Commands.Update;
 using MainCore.Infrasturecture.Extensions;
 using MainCore.Tasks.Base;
@@ -10,10 +10,13 @@ namespace MainCore.Tasks
         IChromeBrowser browser,
         UpdateBuildingCommand.Handler updateBuildingCommand,
         ToDorfCommand.Handler toDorfCommand,
-        IDbContextFactory<AppDbContext> contextFactory)
+        IDbContextFactory<AppDbContext> contextFactory,
+        TaskManager taskManager)
     {
-        public sealed class Task(AccountId accountId, VillageId villageId) : VillageTask(accountId, villageId)
+        public sealed class Task(AccountId accountId, VillageId villageId, bool oneShot = false) : VillageTask(accountId, villageId)
         {
+            public bool OneShot { get; } = oneShot;
+            public bool ForceFullScan { get; set; } = oneShot;
             protected override string TaskName => "Update village";
 
             public override bool CanStart(AppDbContext context)
@@ -33,7 +36,18 @@ namespace MainCore.Tasks
             bool isFailed;
             IReadOnlyList<IError> errors;
 
-            if (url.Contains("dorf1"))
+            if (task.ForceFullScan)
+            {
+                result = await toDorfCommand.HandleAsync(new(1), cancellationToken);
+                if (result.IsFailed) return result;
+                (_, isFailed, errors) = await updateBuildingCommand.HandleAsync(new(task.VillageId), cancellationToken);
+                if (isFailed) return Result.Fail(errors);
+                result = await toDorfCommand.HandleAsync(new(2), cancellationToken);
+                if (result.IsFailed) return result;
+                (_, isFailed, errors) = await updateBuildingCommand.HandleAsync(new(task.VillageId), cancellationToken);
+                if (isFailed) return Result.Fail(errors);
+            }
+            else if (url.Contains("dorf1"))
             {
                 (_, isFailed, errors) = await updateBuildingCommand.HandleAsync(new(task.VillageId), cancellationToken);
                 if (isFailed) return Result.Fail(errors);
@@ -58,7 +72,10 @@ namespace MainCore.Tasks
                 if (isFailed) return Result.Fail(errors);
             }
 
-            task.ExecuteAt = GetNextExecuteTime(task.VillageId);
+            task.ForceFullScan = false;
+            using var settings = contextFactory.CreateDbContext();
+            if (task.OneShot && !task.CanStart(settings)) taskManager.Remove(task.AccountId, task);
+            else task.ExecuteAt = GetNextExecuteTime(task.VillageId);
             return Result.Ok();
         }
 

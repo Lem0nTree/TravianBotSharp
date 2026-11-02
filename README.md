@@ -108,3 +108,7 @@ User guides are available in [FAQs/README.md](FAQs/README.md).
 - NPC and troop training
 - Farming setup
 
+
+## Local chat control
+
+See [Local MCP control](docs/mcp-setup.md) for setup, supported operations, and cached-data behavior.

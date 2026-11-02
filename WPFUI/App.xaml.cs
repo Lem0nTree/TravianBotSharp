@@ -34,6 +34,13 @@ namespace WPFUI
         {
             base.OnStartup(e);
             var hostBuilder = AppMixins.GetHostBuilder()
+                .ConfigureServices(services =>
+                {
+                    services.AddSingleton<MainCore.Services.ChatControl.ObservationTracker>();
+                    services.AddSingleton<MainCore.Services.ChatControl.ControlMutations>();
+                    services.AddSingleton<MainCore.Services.ChatControl.ApplicationControlService>();
+                    services.AddHostedService<MainCore.Services.ChatControl.ControlBridge>();
+                })
                 .ConfigureSplatForMicrosoftDependencyResolver()
                 .ConfigureWpf(wpfBuilder => wpfBuilder
                     .UseCurrentApplication(this)
@@ -50,6 +57,7 @@ namespace WPFUI
 
             host.MapSplatLocator(sp =>
             {
+                sp.GetRequiredService<MainCore.Services.ChatControl.ObservationTracker>();
                 SetupDialogService(sp);
                 sp.GetRequiredService<RxQueue>().Setup();
             });

@@ -195,19 +195,22 @@ namespace MainCore.UI.ViewModels.UserControls
             }
 
             var accountId = new AccountId(Accounts.SelectedItem.Id);
+            using var control = await _taskManager.AcquireControlAsync(accountId);
 
             using var context = _contextFactory.CreateDbContext();
 
             if (_taskManager.GetStatus(accountId) != StatusEnums.Offline)
             {
-                await _dialogService.SendMessage("Warning", "Account should be offline");
+                control.Dispose();
+                    await _dialogService.SendMessage("Warning", "Account should be offline");
                 return;
             }
 
             var result = await context.GetValidAccess(accountId);
             if (result.IsFailed)
             {
-                await _dialogService.SendMessage("Warning", string.Join(Environment.NewLine, result.Errors.Select(x => x.Message)));
+                control.Dispose();
+                    await _dialogService.SendMessage("Warning", string.Join(Environment.NewLine, result.Errors.Select(x => x.Message)));
                 return;
             }
 
@@ -221,7 +224,8 @@ namespace MainCore.UI.ViewModels.UserControls
             }
             catch (Exception ex)
             {
-                await _dialogService.SendMessage("Error", $"Failed to open browser: {ex.Message}");
+                control.Dispose();
+                    await _dialogService.SendMessage("Error", $"Failed to open browser: {ex.Message}");
                 _taskManager.SetStatus(accountId, StatusEnums.Offline);
                 return;
             }
@@ -241,16 +245,19 @@ namespace MainCore.UI.ViewModels.UserControls
             }
 
             var accountId = new AccountId(Accounts.SelectedItem.Id);
+            using var control = await _taskManager.AcquireControlAsync(accountId);
             var status = _taskManager.GetStatus(accountId);
             switch (status)
             {
                 case StatusEnums.Offline:
+                    control.Dispose();
                     await _dialogService.SendMessage("Warning", "Account's browser is already closed");
                     return;
 
                 case StatusEnums.Starting:
                 case StatusEnums.Pausing:
                 case StatusEnums.Stopping:
+                    control.Dispose();
                     await _dialogService.SendMessage("Warning", $"TBS is {status}. Please waiting");
                     return;
 
@@ -278,11 +285,13 @@ namespace MainCore.UI.ViewModels.UserControls
             }
 
             var accountId = new AccountId(Accounts.SelectedItem.Id);
+            using var control = await _taskManager.AcquireControlAsync(accountId);
 
             var status = _taskManager.GetStatus(accountId);
             switch (status)
             {
                 case StatusEnums.Paused:
+                    if (_taskManager.IsExecuting(accountId)) return;
                     _taskManager.SetStatus(accountId, StatusEnums.Online);
                     break;
 
@@ -294,6 +303,7 @@ namespace MainCore.UI.ViewModels.UserControls
                 case StatusEnums.Starting:
                 case StatusEnums.Pausing:
                 case StatusEnums.Stopping:
+                    control.Dispose();
                     await _dialogService.SendMessage("Information", $"Account is {status}");
                     break;
 
@@ -312,6 +322,7 @@ namespace MainCore.UI.ViewModels.UserControls
             }
 
             var accountId = new AccountId(Accounts.SelectedItem.Id);
+            using var control = await _taskManager.AcquireControlAsync(accountId);
             var status = _taskManager.GetStatus(accountId);
 
             switch (status)
@@ -320,14 +331,17 @@ namespace MainCore.UI.ViewModels.UserControls
                 case StatusEnums.Starting:
                 case StatusEnums.Pausing:
                 case StatusEnums.Stopping:
+                    control.Dispose();
                     await _dialogService.SendMessage("Information", $"Account is {status}");
                     return;
 
                 case StatusEnums.Online:
+                    control.Dispose();
                     await _dialogService.SendMessage("Information", "Account should be paused first");
                     return;
 
                 case StatusEnums.Paused:
+                    if (_taskManager.IsExecuting(accountId)) return;
                     _taskManager.SetStatus(accountId, StatusEnums.Starting);
                     await Task.Delay(300);
                     _taskManager.Clear(accountId);

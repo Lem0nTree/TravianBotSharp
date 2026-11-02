@@ -88,8 +88,9 @@ namespace MainCore.UI.ViewModels.Tabs
             var count = _taskFailures.Count(accountId);
             if (count == 0) { await _dialogService.SendMessage("Failed tasks", "There are no held tasks for this account."); return; }
             if (!await _dialogService.SendConfirm("Retry failed tasks", $"Retry {count} held task(s)? Inspect the game for any uncertain hero transfers, construction or NPC exchanges first. Retry only after checking what already happened.")) return;
+            using var control = await _taskManager.AcquireControlAsync(accountId);
             if (AccountId != accountId || _taskManager.GetStatus(accountId) is not (StatusEnums.Paused or StatusEnums.Offline) || _taskManager.IsExecuting(accountId))
-            { await _dialogService.SendMessage("Retry cancelled", "The selected account or its state changed. Pause it and inspect the game before retrying."); return; }
+            { control.Dispose(); await _dialogService.SendMessage("Retry cancelled", "The selected account or its state changed. Pause it and inspect the game before retrying."); return; }
             _taskFailures.ResetAfterInspection(accountId, _taskManager.GetTaskList(accountId));
             _rxQueue.Enqueue(new TasksModified(accountId));
         }

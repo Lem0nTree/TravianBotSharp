@@ -275,7 +275,9 @@ namespace MainCore.UI.ViewModels.Tabs.Villages
         [ReactiveCommand(RunInBackground = true)]
         private async Task BuildNormal()
         {
-            if (!await EnsureAccountPaused()) return;
+            var AccountId = this.AccountId;
+            var VillageId = this.VillageId;
+            if (!await EnsureAccountPaused(AccountId)) return;
 
             var result = await _normalBuildInputValidator.ValidateAsync(NormalBuildInput);
             if (!result.IsValid)
@@ -296,6 +298,9 @@ namespace MainCore.UI.ViewModels.Tabs.Villages
                 Level = level,
             };
 
+            using var control = await _taskManager.AcquireControlAsync(AccountId);
+            if (AccountId != this.AccountId || VillageId != this.VillageId) return;
+            if (!await EnsureAccountPaused(AccountId, control)) return;
             using var context = _contextFactory.CreateDbContext();
             var buildings = context.GetLayoutBuildings(VillageId);
             var building = buildings.Find(x => x.Location == plan.Location);
@@ -305,6 +310,7 @@ namespace MainCore.UI.ViewModels.Tabs.Villages
                 var checkResult = plan.Type.CheckRequirements(buildings);
                 if (checkResult.IsFailed)
                 {
+                    control.Dispose();
                     await _dialogService.SendMessage("Error", string.Join(Environment.NewLine, checkResult.Errors.Select(x => x.Message)));
                     return;
                 }
@@ -317,10 +323,15 @@ namespace MainCore.UI.ViewModels.Tabs.Villages
         [ReactiveCommand(RunInBackground = true)]
         private async Task UpgradeOneLevel()
         {
-            if (!await EnsureAccountPaused()) return;
+            var AccountId = this.AccountId;
+            var VillageId = this.VillageId;
+            if (!await EnsureAccountPaused(AccountId)) return;
             if (!await EnsureBuildingSelected()) return;
             var location = Buildings.SelectedIndex + 1;
 
+            using var control = await _taskManager.AcquireControlAsync(AccountId);
+            if (AccountId != this.AccountId || VillageId != this.VillageId) return;
+            if (!await EnsureAccountPaused(AccountId, control)) return;
             using var context = _contextFactory.CreateDbContext();
             context.Upgrade(VillageId, location, false);
         }
@@ -328,10 +339,15 @@ namespace MainCore.UI.ViewModels.Tabs.Villages
         [ReactiveCommand(RunInBackground = true)]
         private async Task UpgradeMaxLevel()
         {
-            if (!await EnsureAccountPaused()) return;
+            var AccountId = this.AccountId;
+            var VillageId = this.VillageId;
+            if (!await EnsureAccountPaused(AccountId)) return;
             if (!await EnsureBuildingSelected()) return;
             var location = Buildings.SelectedIndex + 1;
 
+            using var control = await _taskManager.AcquireControlAsync(AccountId);
+            if (AccountId != this.AccountId || VillageId != this.VillageId) return;
+            if (!await EnsureAccountPaused(AccountId, control)) return;
             using var context = _contextFactory.CreateDbContext();
             context.Upgrade(VillageId, location, true);
         }
@@ -339,7 +355,9 @@ namespace MainCore.UI.ViewModels.Tabs.Villages
         [ReactiveCommand(RunInBackground = true)]
         private async Task BuildResource()
         {
-            if (!await EnsureAccountPaused()) return;
+            var AccountId = this.AccountId;
+            var VillageId = this.VillageId;
+            if (!await EnsureAccountPaused(AccountId)) return;
 
             var result = await _resourceBuildInputValidator.ValidateAsync(ResourceBuildInput);
             if (!result.IsValid)
@@ -348,6 +366,9 @@ namespace MainCore.UI.ViewModels.Tabs.Villages
                 return;
             }
 
+            using var control = await _taskManager.AcquireControlAsync(AccountId);
+            if (AccountId != this.AccountId || VillageId != this.VillageId) return;
+            if (!await EnsureAccountPaused(AccountId, control)) return;
             using var context = _contextFactory.CreateDbContext();
             context.AddJob(VillageId, ResourceBuildInput);
         }
@@ -355,63 +376,102 @@ namespace MainCore.UI.ViewModels.Tabs.Villages
         [ReactiveCommand(RunInBackground = true)]
         private async Task Up()
         {
-            if (!await EnsureAccountPaused()) return;
+            var AccountId = this.AccountId;
+            var VillageId = this.VillageId;
+            if (!await EnsureAccountPaused(AccountId)) return;
             if (!await EnsureJobSelected()) return;
 
+            using var control = await _taskManager.AcquireControlAsync(AccountId);
+            if (AccountId != this.AccountId || VillageId != this.VillageId) return;
+            if (!await EnsureAccountPaused(AccountId, control)) return;
             using var context = _contextFactory.CreateDbContext();
-            var newIndex = context.SwapJob(new JobId(Jobs[Jobs.SelectedIndex].Id), MoveEnums.Up);
+            var jobId = Jobs.SelectedItem?.Id;
+            if (jobId is null || !context.Jobs.Any(x => x.Id == jobId.Value && x.VillageId == VillageId.Value)) return;
+            var newIndex = context.SwapJob(new JobId(jobId.Value), MoveEnums.Up);
             Jobs.SelectedIndex = newIndex;
         }
 
         [ReactiveCommand(RunInBackground = true)]
         private async Task Down()
         {
-            if (!await EnsureAccountPaused()) return;
+            var AccountId = this.AccountId;
+            var VillageId = this.VillageId;
+            if (!await EnsureAccountPaused(AccountId)) return;
             if (!await EnsureJobSelected()) return;
 
+            using var control = await _taskManager.AcquireControlAsync(AccountId);
+            if (AccountId != this.AccountId || VillageId != this.VillageId) return;
+            if (!await EnsureAccountPaused(AccountId, control)) return;
             using var context = _contextFactory.CreateDbContext();
-            var newIndex = context.SwapJob(new JobId(Jobs[Jobs.SelectedIndex].Id), MoveEnums.Down);
+            var jobId = Jobs.SelectedItem?.Id;
+            if (jobId is null || !context.Jobs.Any(x => x.Id == jobId.Value && x.VillageId == VillageId.Value)) return;
+            var newIndex = context.SwapJob(new JobId(jobId.Value), MoveEnums.Down);
             Jobs.SelectedIndex = newIndex;
         }
 
         [ReactiveCommand(RunInBackground = true)]
         private async Task Top()
         {
-            if (!await EnsureAccountPaused()) return;
+            var AccountId = this.AccountId;
+            var VillageId = this.VillageId;
+            if (!await EnsureAccountPaused(AccountId)) return;
             if (!await EnsureJobSelected()) return;
 
+            using var control = await _taskManager.AcquireControlAsync(AccountId);
+            if (AccountId != this.AccountId || VillageId != this.VillageId) return;
+            if (!await EnsureAccountPaused(AccountId, control)) return;
             using var context = _contextFactory.CreateDbContext();
-            var newIndex = context.MoveJob(new JobId(Jobs[Jobs.SelectedIndex].Id), MoveEnums.Top);
+            var jobId = Jobs.SelectedItem?.Id;
+            if (jobId is null || !context.Jobs.Any(x => x.Id == jobId.Value && x.VillageId == VillageId.Value)) return;
+            var newIndex = context.MoveJob(new JobId(jobId.Value), MoveEnums.Top);
             Jobs.SelectedIndex = newIndex;
         }
 
         [ReactiveCommand(RunInBackground = true)]
         private async Task Bottom()
         {
-            if (!await EnsureAccountPaused()) return;
+            var AccountId = this.AccountId;
+            var VillageId = this.VillageId;
+            if (!await EnsureAccountPaused(AccountId)) return;
             if (!await EnsureJobSelected()) return;
 
+            using var control = await _taskManager.AcquireControlAsync(AccountId);
+            if (AccountId != this.AccountId || VillageId != this.VillageId) return;
+            if (!await EnsureAccountPaused(AccountId, control)) return;
             using var context = _contextFactory.CreateDbContext();
-            var newIndex = context.MoveJob(new JobId(Jobs[Jobs.SelectedIndex].Id), MoveEnums.Bottom);
+            var jobId = Jobs.SelectedItem?.Id;
+            if (jobId is null || !context.Jobs.Any(x => x.Id == jobId.Value && x.VillageId == VillageId.Value)) return;
+            var newIndex = context.MoveJob(new JobId(jobId.Value), MoveEnums.Bottom);
             Jobs.SelectedIndex = newIndex;
         }
 
         [ReactiveCommand(RunInBackground = true)]
         private async Task Delete()
         {
-            if (!await EnsureAccountPaused()) return;
+            var AccountId = this.AccountId;
+            var VillageId = this.VillageId;
+            if (!await EnsureAccountPaused(AccountId)) return;
             if (Jobs.SelectedItem is null) return;
             var jobId = Jobs.SelectedItem.Id;
 
+            using var control = await _taskManager.AcquireControlAsync(AccountId);
+            if (AccountId != this.AccountId || VillageId != this.VillageId) return;
+            if (!await EnsureAccountPaused(AccountId, control)) return;
             using var context = _contextFactory.CreateDbContext();
+            if (!context.Jobs.Any(x => x.Id == jobId && x.VillageId == VillageId.Value)) return;
             context.DeleteJobById(new JobId(jobId));
         }
 
         [ReactiveCommand(RunInBackground = true)]
         private async Task DeleteAll()
         {
-            if (!await EnsureAccountPaused()) return;
+            var AccountId = this.AccountId;
+            var VillageId = this.VillageId;
+            if (!await EnsureAccountPaused(AccountId)) return;
 
+            using var control = await _taskManager.AcquireControlAsync(AccountId);
+            if (AccountId != this.AccountId || VillageId != this.VillageId) return;
+            if (!await EnsureAccountPaused(AccountId, control)) return;
             using var context = _contextFactory.CreateDbContext();
             context.Jobs
                 .Where(x => x.VillageId == VillageId.Value)
@@ -421,7 +481,9 @@ namespace MainCore.UI.ViewModels.Tabs.Villages
         [ReactiveCommand(RunInBackground = true)]
         private async Task Import()
         {
-            if (!await EnsureAccountPaused()) return;
+            var AccountId = this.AccountId;
+            var VillageId = this.VillageId;
+            if (!await EnsureAccountPaused(AccountId)) return;
             var path = await _dialogService.OpenFileDialog();
             if (string.IsNullOrEmpty(path)) return;
             List<JobDto> jobs;
@@ -447,6 +509,9 @@ namespace MainCore.UI.ViewModels.Tabs.Villages
 
             var shuffle = await _dialogService.SendConfirm("Warning", "Do you want to random building location?");
 
+            using var control = await _taskManager.AcquireControlAsync(AccountId);
+            if (AccountId != this.AccountId || VillageId != this.VillageId) return;
+            if (!await EnsureAccountPaused(AccountId, control)) return;
             using var context = _contextFactory.CreateDbContext();
 
             var fixedJobs = context.FixJobs(VillageId, jobs, shuffle);
@@ -470,11 +535,16 @@ namespace MainCore.UI.ViewModels.Tabs.Villages
         [ReactiveCommand(RunInBackground = true)]
         private async Task Export()
         {
-            if (!await EnsureAccountPaused()) return;
+            var AccountId = this.AccountId;
+            var VillageId = this.VillageId;
+            if (!await EnsureAccountPaused(AccountId)) return;
 
             var path = await _dialogService.SaveFileDialog();
             if (string.IsNullOrEmpty(path)) return;
 
+            using var control = await _taskManager.AcquireControlAsync(AccountId);
+            if (AccountId != this.AccountId || VillageId != this.VillageId) return;
+            if (!await EnsureAccountPaused(AccountId, control)) return;
             using var context = _contextFactory.CreateDbContext();
             var jobs = context.Jobs
                 .Where(x => x.VillageId == VillageId.Value)
@@ -485,12 +555,14 @@ namespace MainCore.UI.ViewModels.Tabs.Villages
             var jsonString = JsonSerializer.Serialize(jobs);
             await File.WriteAllTextAsync(path, jsonString);
 
-            await _dialogService.SendMessage("Information", "Job list exported");
+            control.Dispose();
+                    await _dialogService.SendMessage("Information", "Job list exported");
         }
 
-        private async Task<bool> EnsureAccountPaused()
+        private async Task<bool> EnsureAccountPaused(AccountId accountId, IDisposable? control = null)
         {
-            if (IsAccountPaused(AccountId)) return true;
+            if (IsAccountPaused(accountId)) return true;
+            control?.Dispose();
             await _dialogService.SendMessage("Warning", "Please pause account before modifying building queue");
             return false;
         }
@@ -512,7 +584,7 @@ namespace MainCore.UI.ViewModels.Tabs.Villages
         private bool IsAccountPaused(AccountId accountId)
         {
             var status = _taskManager.GetStatus(accountId);
-            return status != StatusEnums.Online;
+            return (status is StatusEnums.Paused or StatusEnums.Offline) && !_taskManager.IsExecuting(accountId);
         }
     }
 }

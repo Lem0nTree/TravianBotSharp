@@ -385,3 +385,6 @@ Web/Shared/
 .understand-anything/diff-overlay.json
 twilio-alerts.local.json
 twilio-auth.local.dpapi
+
+# Generated WPF temporary projects
+WPFUI/*_wpftmp.csproj

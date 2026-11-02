@@ -75,8 +75,12 @@ namespace MainCore.Services
                 .Build();
         }
 
+        private readonly ConcurrentDictionary<AccountId, SemaphoreSlim> _executionGates = [];
+
         public async Task Execute(AccountId accountId)
         {
+            var executionGate = _executionGates.GetOrAdd(accountId, static _ => new SemaphoreSlim(1, 1));
+            if (!await executionGate.WaitAsync(0)) return;
             var phase = "startup";
             try { await ExecuteCore(accountId, value => phase = value); }
             catch (Exception ex)
@@ -94,17 +98,21 @@ namespace MainCore.Services
                 if (queue.IsExecuting)
                 {
                     foreach (var running in _taskManager.GetTaskList(accountId).Where(x => x.Stage == StageEnums.Executing)) running.Stage = StageEnums.Waiting;
-                    queue.IsExecuting = false;
                     queue.CancellationTokenSource?.Dispose();
                     queue.CancellationTokenSource = null;
                     _rxQueue.Enqueue(new TasksModified(accountId));
+                    if (queue.Status == StatusEnums.Pausing) _taskManager.SetStatus(accountId, StatusEnums.Paused);
+                    // Only now is the account genuinely quiescent.
+                    queue.IsExecuting = false;
                 }
+                executionGate.Release();
             }
         }
 
         private async Task ExecuteCore(AccountId accountId, Action<string> phase)
         {
             var taskQueue = _taskManager.GetTaskQueue(accountId);
+            using var selectionLease = await _taskManager.AcquireControlAsync(accountId);
 
             var status = taskQueue.Status;
             if (status != StatusEnums.Online) return;
@@ -130,6 +138,7 @@ namespace MainCore.Services
             task.Stage = StageEnums.Executing;
             _rxQueue.Enqueue(new TasksModified(accountId));
 
+            selectionLease.Dispose();
             var cacheExecuteTime = task.ExecuteAt;
 
             phase("task-scope");
@@ -149,10 +158,7 @@ namespace MainCore.Services
                     var recovered = await TaskDialogRecovery.CloseNpcAsync(browser);
                     _taskManager.Remove(accountId, task);
                     task.Stage = StageEnums.Waiting;
-                    taskQueue.IsExecuting = false;
                     var wasCancelled = cts.IsCancellationRequested;
-                    cts.Dispose();
-                    taskQueue.CancellationTokenSource = null;
                     logger.Information("NPC stage=queued_task_skipped village={VillageId} reason=disabled-or-ineligible; paid exchange was not attempted", npc.VillageId.Value);
                     if (!recovered)
                     {
@@ -195,11 +201,7 @@ namespace MainCore.Services
             task.Stage = StageEnums.Waiting;
             _rxQueue.Enqueue(new TasksModified(accountId));
 
-            taskQueue.IsExecuting = false;
-
             var userCancelled = cts.IsCancellationRequested;
-            cts.Dispose();
-            taskQueue.CancellationTokenSource = null;
 
             var local = TaskFailureController.IsLocal(task);
             phase("task-outcome");
@@ -335,7 +337,8 @@ namespace MainCore.Services
             if (task is IEvasionTask || _taskManager.GetTaskList(accountId).Any(x => x is IEvasionTask && x.ExecuteAt <= DateTime.Now.AddSeconds(20))) return;
             using var context = _contextFactory.CreateDbContext();
             var delay = context.ByName(accountId, AccountSettingEnums.TaskDelayMin, AccountSettingEnums.TaskDelayMax);
-            await Task.Delay(delay);
+            try { await Task.Delay(delay, cts.Token); }
+            catch (OperationCanceledException) when (cts.IsCancellationRequested) { }
         }
 
         private void NotifyAccountFailure(AccountId accountId, bool stateMayBeUnsaved = false) =>

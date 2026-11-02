@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "travianbot": {
+      "command": "C:\\PATH\\TO\\mcp\\TravianBotSharp.Mcp.exe",
+      "args": ["--app-directory", "C:\\PATH\\TO\\RUNNING\\BOT"]
+    }
+  }
+}
